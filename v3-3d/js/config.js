@@ -1,12 +1,11 @@
 export const CFG = {
-  worldSize: 160,
-  terrainSegments: 28,
+  worldSize: 140,
+  terrainSegments: 20,
   daySeconds: 180,
-  entityCullDist: 42,
-  entityAiDist: 38,
+  entityCullDist: 38,
+  entityAiDist: 32,
+  entityVisibleDist: 45,
   spawnInvuln: 4,
-  fixedDt: 1 / 60,
-  maxCatchUp: 2,
   player: {
     walkSpeed: 7,
     runSpeed: 12,
@@ -24,20 +23,25 @@ export const CFG = {
     coyoteTime: 0.12,
   },
   decay: { hunger: 0.2, thirst: 0.32 },
-  spawn: { tree: 52, rock: 24, bush: 28, deer: 7, rabbit: 8, wolf: 3 },
+  spawn: { tree: 38, rock: 18, bush: 20, deer: 6, rabbit: 6, wolf: 2 },
   camera: {
     dist: 6.5,
     height: 2.8,
     sensX: 0.0022,
     sensY: 0.002,
-    smooth: 0.18,
+    smooth: 0.2,
   },
   craft: {
     cooked_meat: { meat: 1, wood: 1 },
   },
   ui: {
-    barsInterval: 0.1,
-    labelsInterval: 0.18,
+    barsInterval: 0.12,
+    labelsInterval: 0.35,
+    showWorldLabels: false,
+  },
+  render: {
+    dpr: 1,
+    maxDt: 0.05,
   },
 };
 

@@ -77,7 +77,7 @@ export class Game3D {
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.2, 250);
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, CFG.render.dpr));
     this.renderer.shadowMap.enabled = false;
     document.body.appendChild(this.renderer.domElement);
     this.canvas = this.renderer.domElement;
@@ -135,17 +135,22 @@ export class Game3D {
     this.ui.showPause(false);
 
     const keepTypes = new Set(['AmbientLight', 'HemisphereLight', 'DirectionalLight']);
+    const keepNodes = new Set([this.sun, this.sun.target, this.human?.group].filter(Boolean));
     [...this.scene.children].forEach((c) => {
-      if (!keepTypes.has(c.type) && c !== this.sun) this.scene.remove(c);
+      if (!keepTypes.has(c.type) && !keepNodes.has(c)) this.scene.remove(c);
     });
 
     this.world = new World3D(this.scene);
     this.world.generate();
     this.vfx = new VfxManager(this.scene);
-    this.human = new HumanCharacter();
-    this.ui.toast('正在加载拟真角色模型…', 'info');
-    await this.human.load();
-    this.scene.add(this.human.group);
+
+    if (!this.human) {
+      this.human = new HumanCharacter();
+      await this.human.load();
+      this.scene.add(this.human.group);
+    } else if (!this.human.group.parent) {
+      this.scene.add(this.human.group);
+    }
 
     const spawnY = this.world.getHeightAt(0, 0);
     this.player = this._newPlayer();
@@ -192,17 +197,10 @@ export class Game3D {
     }
 
     if (!this.paused) {
-      this.accumulator += rawDt;
-      const step = CFG.fixedDt;
-      const maxSteps = CFG.maxCatchUp;
-      let steps = 0;
-      while (this.accumulator >= step && steps < maxSteps) {
-        this._update(step);
-        this.accumulator -= step;
-        steps += 1;
-      }
-      this.vfx?.update(rawDt);
-      this.ui.updateFloats(rawDt);
+      const dt = Math.min(rawDt, CFG.render.maxDt);
+      this._update(dt);
+      this.vfx?.update(dt);
+      this.ui.updateFloats(dt);
     }
 
     this._render();
@@ -379,8 +377,11 @@ export class Game3D {
         e._lastX = e.x;
         e._lastZ = e.z;
       }
-      e.mesh.position.set(e.x, e.y, e.z);
-      if ((e.passive || CREATURES[e.type]) && dist > 0.5) {
+      if (e.mesh) {
+        e.mesh.position.set(e.x, e.y, e.z);
+        e.mesh.visible = dist < CFG.entityVisibleDist;
+      }
+      if ((e.passive || CREATURES[e.type]) && dist > 0.5 && e.mesh) {
         e.mesh.rotation.y = Math.atan2(dx, dz);
       }
     }
@@ -499,7 +500,7 @@ export class Game3D {
 
   _killEntity(e, harvest) {
     e.dead = true;
-    this.scene.remove(e.mesh);
+    this.world.hideEntityVisual(e);
     if (RESOURCES[e.type]) {
       this.world.colliders = this.world.colliders.filter(
         (c) => Math.abs(c.x - e.x) > 0.1 || Math.abs(c.z - e.z) > 0.1
@@ -556,6 +557,7 @@ export class Game3D {
     const p = this.player;
     this.ui.updateInventory(this.inventory);
     this.ui.updateCompass(this.yaw);
+    if (!CFG.ui.showWorldLabels) return;
     const w = this.renderer.domElement.clientWidth;
     const h = this.renderer.domElement.clientHeight;
     this.ui.updateWorldLabels(
