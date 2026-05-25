@@ -981,12 +981,12 @@ export class Game3D {
       p.x, p.z, CFG.player.interactRange, CFG.player.attackRange, this.phase === 'night'
     );
     const focus = this.focusTarget;
+    const nearCampfire = this.buildSys?.getNearCampfire(p.x, p.z);
+    const nearShelter = this.buildSys?.getNearShelter(p.x, p.z);
     const prompt = this.ui.getTargetPrompt(focus, this.inventory, {
       nearCampfire: !!nearCampfire,
       nearShelter: !!nearShelter,
     });
-    const nearCampfire = this.buildSys?.getNearCampfire(p.x, p.z);
-    const nearShelter = this.buildSys?.getNearShelter(p.x, p.z);
     this._statusHintCd -= CFG.ui.barsInterval;
     if (this._statusHintCd <= 0) {
       this._statusHintCd = 2.5;
