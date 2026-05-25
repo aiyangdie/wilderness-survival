@@ -72,9 +72,13 @@ export class EquipmentManager {
     this.slots = { weapon: null, armor: null, accessory: null };
     this.meshes = { weapon: null, armor: null, accessory: null };
     this.socket = new THREE.Group();
-    this.socket.position.set(0.42, 1.05, 0.15);
-    this.socket.rotation.y = -0.4;
-    human.group.add(this.socket);
+    this.socket.position.set(0.08, 0, 0.02);
+    this.socket.rotation.set(-Math.PI / 2, 0, 0);
+    if (!human.attachEquipmentSocket?.(this.socket)) {
+      this.socket.position.set(0.42, 1.05, 0.15);
+      this.socket.rotation.set(-Math.PI / 2, 0, -0.4);
+      human.group.add(this.socket);
+    }
   }
 
   getStats() {
@@ -135,15 +139,30 @@ export class EquipmentManager {
     }
   }
 
-  applyAttackPose(t) {
+  applyAttackPose(t, weaponId) {
     const w = this.meshes.weapon;
     if (!w) return;
-    w.rotation.x = -1.4 * Math.sin(t * Math.PI);
-    w.rotation.z = 0.15 * Math.sin(t * Math.PI);
+    const thrust = weaponId === 'wooden_spear';
+    const bow = weaponId === 'wooden_bow';
+    if (bow) {
+      w.rotation.x = -0.4 * Math.sin(t * Math.PI);
+      w.rotation.y = 0.5 * Math.sin(t * Math.PI);
+      return;
+    }
+    if (thrust) {
+      w.rotation.x = -0.3 * Math.sin(t * Math.PI);
+      w.position.x = 0.42 + 0.35 * Math.sin(t * Math.PI);
+      return;
+    }
+    w.rotation.x = -1.5 * Math.sin(t * Math.PI);
+    w.rotation.z = 0.25 * Math.sin(t * Math.PI);
   }
 
   resetPose() {
     const w = this.meshes.weapon;
-    if (w) w.rotation.set(0, 0, 0);
+    if (w) {
+      w.rotation.set(0, 0, 0);
+      w.position.set(0, 0, 0);
+    }
   }
 }

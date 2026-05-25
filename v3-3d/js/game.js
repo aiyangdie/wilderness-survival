@@ -27,6 +27,7 @@ export class Game3D {
     this.isAttacking = false;
     this.attackAnimTimer = 0;
     this._attackPulse = false;
+    this._interactPulse = false;
     this.coyoteTimer = 0;
     this.invShow = true;
     this.prevHealth = 100;
@@ -482,7 +483,10 @@ export class Game3D {
       p.y = groundY;
     }
 
-    if (p.onGround && !this.wasOnGround) this.human.triggerLand();
+    if (p.onGround && !this.wasOnGround) {
+      this.human.triggerLand();
+      this.vfx?.dust(p.x, p.y, p.z);
+    }
     this.wasOnGround = p.onGround;
 
     if (moving && p.onGround && run) {
@@ -493,8 +497,21 @@ export class Game3D {
     }
 
     this.human.setPosition(p.x, p.y, p.z);
-    this.human.update(this._animDt ?? dt, moving ? speed : 0, p.onGround, this._attackPulse, this.equipment);
+    this.human.update(
+      this._animDt ?? dt,
+      {
+        speed: moving ? speed : 0,
+        onGround: p.onGround,
+        vy: p.vy,
+        sprinting: run && moving,
+        attackPulse: this._attackPulse,
+        interactPulse: this._interactPulse,
+        weaponId: this.equipment?.slots?.weapon || null,
+      },
+      this.equipment
+    );
     if (this._attackPulse) this._attackPulse = false;
+    if (this._interactPulse) this._interactPulse = false;
     return run && moving;
   }
 
@@ -635,7 +652,7 @@ export class Game3D {
     p.attackCd = CFG.player.attackCooldown;
     this.isAttacking = true;
     this._attackPulse = true;
-    this.attackAnimTimer = 0.45;
+    this.attackAnimTimer = 0.48;
     this.human._attackStarted = false;
 
     const e = target.entity;
@@ -665,6 +682,7 @@ export class Game3D {
     );
     if (catchT) {
       const { x, y, z } = catchT.entity;
+      this._interactPulse = true;
       this._killEntity(catchT.entity, true);
       this.interactCooldown = 0.5;
       this.vfx.burst(x, y, z, 0xa8dadc, 4);
@@ -676,6 +694,7 @@ export class Game3D {
     const bush = this.world.getNearestBush(p.x, p.z, 2.8);
     if (bush && p.thirst < 88) {
       this.interactCooldown = 0.6;
+      this._interactPulse = true;
       p.thirst = Math.min(100, p.thirst + (bush.def?.drink || 15));
       this.ui.toast('从灌木丛取水饮用', 'success');
       return;
@@ -684,6 +703,7 @@ export class Game3D {
     const target = this.world.getInteractable(p.x, p.z, CFG.player.interactRange);
     if (target) {
       this.interactCooldown = 0.3;
+      this._interactPulse = true;
       const e = target.entity;
       e.hp -= CFG.player.interactDamage + stats.interactBonus;
       this.vfx.burst(e.x, e.y, e.z, 0x8fbc8f, 3);
@@ -696,6 +716,7 @@ export class Game3D {
 
     if ((this.inventory.cooked_meat || 0) > 0) {
       this.interactCooldown = 0.55;
+      this._interactPulse = true;
       this.inventory.cooked_meat--;
       this.ui.markInventoryDirty();
       p.hunger = Math.min(100, p.hunger + 42);
@@ -706,6 +727,7 @@ export class Game3D {
 
     if ((this.inventory.meat || 0) > 0) {
       this.interactCooldown = 0.55;
+      this._interactPulse = true;
       this.inventory.meat--;
       this.ui.markInventoryDirty();
       p.hunger = Math.min(100, p.hunger + 22);
