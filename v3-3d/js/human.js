@@ -15,13 +15,11 @@ export class HumanCharacter {
 
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.28), shirt);
     torso.position.y = 1.15;
-    torso.castShadow = true;
     this.group.add(torso);
     this.meshParts.torso = torso;
 
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 16), skin);
     head.position.y = 1.65;
-    head.castShadow = true;
     this.group.add(head);
 
     const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(0.23, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), hair);
@@ -41,7 +39,6 @@ export class HumanCharacter {
     pivot.position.set(x, pivotY, 0);
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * 0.8), mat);
     mesh.position.y = -h / 2;
-    mesh.castShadow = true;
     pivot.add(mesh);
     this.group.add(pivot);
     pivot.userData.limbType = type;
@@ -65,10 +62,11 @@ export class HumanCharacter {
     }
 
     if (isAttacking) {
-      this.meshParts.rightArm.rotation.x = -1.4;
-      this.meshParts.torso.rotation.y = 0.15;
+      this.meshParts.rightArm.rotation.x = -1.2;
+      this.meshParts.torso.rotation.y = 0.2;
     } else {
-      this.meshParts.torso.rotation.y *= 0.9;
+      this.meshParts.torso.rotation.y *= 0.88;
+      if (Math.abs(this.meshParts.torso.rotation.y) < 0.02) this.meshParts.torso.rotation.y = 0;
     }
 
     const bob = moving ? Math.abs(Math.sin(this.walkPhase * 2)) * 0.04 : 0;

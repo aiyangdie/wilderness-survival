@@ -73,6 +73,11 @@ kbd {
   padding: 2px 6px;
 }
 
+.overlay .sub {
+  font-size: 0.85rem;
+  color: #8fa3b8;
+}
+
 button {
   background: #3ecf8e;
   color: #0a1210;

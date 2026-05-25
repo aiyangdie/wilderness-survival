@@ -1,24 +1,39 @@
 import * as THREE from 'three';
 import { CFG, RESOURCES, CREATURES } from './config.js';
+import { HeightField, terrainHeight } from './terrain.js';
+
+const shared = {
+  trunkGeo: new THREE.CylinderGeometry(0.22, 0.3, 2, 6),
+  crownGeo: new THREE.ConeGeometry(1.1, 2.4, 6),
+  rockGeo: new THREE.DodecahedronGeometry(0.75, 0),
+  bushGeo: new THREE.SphereGeometry(0.55, 6, 6),
+  bodyGeo: new THREE.BoxGeometry(1, 0.75, 1.5),
+  trunkMat: new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 }),
+  crownMat: new THREE.MeshStandardMaterial({ color: 0x2d6a3e, roughness: 0.9 }),
+};
 
 export class World3D {
   constructor(scene) {
     this.scene = scene;
     this.size = CFG.worldSize;
     this.entities = [];
-    this.obstacles = [];
+    this.colliders = [];
+    this.heightField = null;
   }
 
   generate() {
-    const groundGeo = new THREE.PlaneGeometry(this.size, this.size, 32, 32);
+    const seg = CFG.terrainSegments;
+    this.heightField = new HeightField(this.size, seg);
+
+    const groundGeo = new THREE.PlaneGeometry(this.size, this.size, seg, seg);
     const pos = groundGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const y = pos.getY(i);
-      const h = (Math.sin(x * 0.08) + Math.cos(y * 0.07)) * 1.2 + Math.random() * 0.3;
-      pos.setZ(i, h);
+      pos.setZ(i, terrainHeight(x, y));
     }
     groundGeo.computeVertexNormals();
+
     const ground = new THREE.Mesh(
       groundGeo,
       new THREE.MeshStandardMaterial({ color: 0x3d5a3c, roughness: 0.95, flatShading: true })
@@ -29,72 +44,71 @@ export class World3D {
     this.ground = ground;
 
     const place = (type, count) => {
-      for (let i = 0; i < count; i++) {
-        const x = (Math.random() - 0.5) * this.size * 0.85;
-        const z = (Math.random() - 0.5) * this.size * 0.85;
-        this.entities.push(this._createResource(type, x, z));
-      }
+      for (let i = 0; i < count; i++) this._trySpawn(type, 24);
     };
-    place('tree', 120);
-    place('rock', 35);
-    place('bush', 50);
-    place('deer', 10);
-    place('rabbit', 14);
-    place('wolf', 5);
+
+    place('tree', CFG.spawn.tree);
+    place('rock', CFG.spawn.rock);
+    place('bush', CFG.spawn.bush);
+    place('deer', CFG.spawn.deer);
+    place('rabbit', CFG.spawn.rabbit);
+    place('wolf', CFG.spawn.wolf);
   }
 
-  _createResource(type, x, z) {
-    const def = RESOURCES[type] || CREATURES[type];
+  _trySpawn(type, attempts) {
+    for (let i = 0; i < attempts; i++) {
+      const x = (Math.random() - 0.5) * this.size * 0.8;
+      const z = (Math.random() - 0.5) * this.size * 0.8;
+      if (Math.hypot(x, z) < 8) continue;
+      const def = RESOURCES[type] || CREATURES[type];
+      if (this._collides(x, z, def.radius || 1)) continue;
+      this.entities.push(this._createEntity(type, x, z, def));
+      if (RESOURCES[type]) {
+        this.colliders.push({ x, z, r: def.radius || 1 });
+      }
+      return;
+    }
+  }
+
+  _collides(x, z, r) {
+    for (const c of this.colliders) {
+      if (Math.hypot(x - c.x, z - c.z) < c.r + r + 0.5) return true;
+    }
+    return false;
+  }
+
+  _createEntity(type, x, z, def) {
+    const y = this.getHeightAt(x, z);
     const group = new THREE.Group();
-    group.position.set(x, this.getHeightAt(x, z), z);
+    group.position.set(x, y, z);
 
     if (type === 'tree') {
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.25, 0.35, 2.2, 8),
-        new THREE.MeshStandardMaterial({ color: 0x5c4033 })
-      );
-      trunk.position.y = 1.1;
-      trunk.castShadow = true;
-      const crown = new THREE.Mesh(
-        new THREE.ConeGeometry(1.4, 2.8, 8),
-        new THREE.MeshStandardMaterial({ color: 0x2d6a3e })
-      );
-      crown.position.y = 3.2;
-      crown.castShadow = true;
+      const trunk = new THREE.Mesh(shared.trunkGeo, shared.trunkMat);
+      trunk.position.y = 1;
+      const crown = new THREE.Mesh(shared.crownGeo, shared.crownMat);
+      crown.position.y = 2.8;
       group.add(trunk, crown);
-      this.obstacles.push({ x, z, r: 1.2 });
     } else if (type === 'rock') {
       const m = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.9, 0),
-        new THREE.MeshStandardMaterial({ color: def.color })
+        shared.rockGeo,
+        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.85 })
       );
-      m.position.y = 0.5;
-      m.castShadow = true;
+      m.position.y = 0.45;
       group.add(m);
-      this.obstacles.push({ x, z, r: 1 });
     } else if (type === 'bush') {
       const m = new THREE.Mesh(
-        new THREE.SphereGeometry(0.7, 8, 8),
-        new THREE.MeshStandardMaterial({ color: def.color })
+        shared.bushGeo,
+        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.85 })
       );
-      m.position.y = 0.5;
+      m.position.y = 0.4;
       group.add(m);
     } else {
       const body = new THREE.Mesh(
-        new THREE.BoxGeometry(1.2, 0.9, 1.8),
-        new THREE.MeshStandardMaterial({ color: def.color })
+        shared.bodyGeo,
+        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.8 })
       );
-      body.position.y = 0.6;
-      body.castShadow = true;
+      body.position.y = 0.55;
       group.add(body);
-      if (type === 'wolf' || type === 'shadow') {
-        const eye = new THREE.Mesh(
-          new THREE.SphereGeometry(0.08),
-          new THREE.MeshBasicMaterial({ color: 0xff2222 })
-        );
-        eye.position.set(0, 0.9, 0.9);
-        group.add(eye);
-      }
     }
 
     this.scene.add(group);
@@ -104,27 +118,69 @@ export class World3D {
       mesh: group,
       x,
       z,
+      y,
       hp: def.hp,
       maxHp: def.hp,
       def,
       dead: false,
       passive: !!def.passive,
-      vx: 0,
-      vz: 0,
+      radius: def.radius || 1,
     };
   }
 
   getHeightAt(x, z) {
-    const ray = new THREE.Raycaster(new THREE.Vector3(x, 50, z), new THREE.Vector3(0, -1, 0));
-    const hits = ray.intersectObject(this.ground);
-    return hits[0]?.point.y ?? 0;
+    return this.heightField?.sample(x, z) ?? terrainHeight(x, z);
+  }
+
+  resolveCircleMove(px, pz, nx, nz, radius) {
+    let x = nx;
+    let z = nz;
+    for (const c of this.colliders) {
+      const dx = x - c.x;
+      const dz = z - c.z;
+      const dist = Math.hypot(dx, dz);
+      const min = c.r + radius;
+      if (dist < min && dist > 0.0001) {
+        const push = (min - dist) / dist;
+        x += dx * push;
+        z += dz * push;
+      }
+    }
+    const half = this.size * 0.46;
+    x = Math.max(-half, Math.min(half, x));
+    z = Math.max(-half, Math.min(half, z));
+    return { x, z };
   }
 
   spawnNightMonsters() {
-    for (let i = 0; i < 4 + Math.floor(Math.random() * 3); i++) {
-      const x = (Math.random() - 0.5) * this.size * 0.7;
-      const z = (Math.random() - 0.5) * this.size * 0.7;
-      this.entities.push(this._createResource('shadow', x, z));
+    for (let i = 0; i < 3; i++) this._trySpawn('shadow', 16);
+  }
+
+  getInteractable(px, pz, range) {
+    let best = null;
+    let bestD = range;
+    for (const e of this.entities) {
+      if (e.dead || !RESOURCES[e.type]) continue;
+      const d = Math.hypot(e.x - px, e.z - pz);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
     }
+    return best;
+  }
+
+  getAttackTarget(px, pz, range) {
+    let best = null;
+    let bestD = range;
+    for (const e of this.entities) {
+      if (e.dead) continue;
+      const d = Math.hypot(e.x - px, e.z - pz);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    return best;
   }
 }
