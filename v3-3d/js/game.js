@@ -83,28 +83,38 @@ export class Game3D {
     });
     window.addEventListener('resize', () => this._resize());
     this._resize();
+    this._canvasW = window.innerWidth;
+    this._canvasH = window.innerHeight;
   }
 
   _initRenderer() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x87ceeb);
-    this.scene.fog = new THREE.Fog(0x87ceeb, 65, 155);
+    const dayFog = CFG.lighting.day;
+    this.scene.background = new THREE.Color(dayFog.bg);
+    this.scene.fog = new THREE.Fog(dayFog.fog, dayFog.fogNear, dayFog.fogFar);
 
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.2, 250);
+    this.camera = new THREE.PerspectiveCamera(55, 1, 0.2, 280);
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, CFG.render.dpr));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = CFG.render.exposure ?? 1.2;
     this.renderer.shadowMap.enabled = false;
     document.body.appendChild(this.renderer.domElement);
     this.canvas = this.renderer.domElement;
 
-    this.sun = new THREE.DirectionalLight(0xfff5e6, 1.1);
-    this.sun.position.set(40, 55, 30);
+    this.sun = new THREE.DirectionalLight(0xfff8ee, 1.4);
+    this.sun.position.set(40, 60, 30);
     this.sun.castShadow = false;
     this.sun.target = new THREE.Object3D();
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
-    this.scene.add(new THREE.AmbientLight(0x8899aa, 0.5));
-    this.scene.add(new THREE.HemisphereLight(0x87ceeb, 0x3d5a3c, 0.3));
+
+    this.ambient = new THREE.AmbientLight(0xeaf2ff, 0.88);
+    this.scene.add(this.ambient);
+
+    this.hemi = new THREE.HemisphereLight(0xc8e4ff, 0x7ab86a, 0.58);
+    this.scene.add(this.hemi);
   }
 
   _newPlayer() {
@@ -182,7 +192,7 @@ export class Game3D {
     this.player.y = spawnY;
     this.inventory = { wood: 5, fiber: 3 };
     this.day = 1;
-    this.time = 0;
+    this.time = 0.32;
     this.phase = 'day';
     this.nightSpawned = false;
     this.duskWarned = false;
@@ -193,7 +203,10 @@ export class Game3D {
     this.spawnInvuln = CFG.spawnInvuln;
     this.wasOnGround = true;
     this._camPos.set(0, 0, 0);
+    this._lastLitPhase = '';
     this.clock.getDelta();
+    this._updateLighting();
+    this._lastLitPhase = this.phase;
 
     this.ui.showStart(false);
     this.ui.showDead(false);
@@ -486,6 +499,12 @@ export class Game3D {
         e.y = this.world.getHeightAt(e.x, e.z);
         e._lastX = e.x;
         e._lastZ = e.z;
+        e._heightCd = 0;
+      } else if ((e._heightCd ?? 0) <= 0 && dist < 28) {
+        e.y = this.world.getHeightAt(e.x, e.z);
+        e._heightCd = 0.28;
+      } else if (e._heightCd > 0) {
+        e._heightCd -= dt;
       }
 
       if (!e.visual) continue;
@@ -549,7 +568,7 @@ export class Game3D {
     this.vfx.burst(e.x, e.y, e.z, col, 5);
     this.vfx.slash(p.x, p.y, p.z, this.human.group.rotation.y);
     this.ui.floatDamage(
-      e.x, e.y, e.z, dmg, this.camera, this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight
+      e.x, e.y, e.z, dmg, this.camera, this._canvasW, this._canvasH
     );
 
     if (e.hp <= 0) {
@@ -686,9 +705,7 @@ export class Game3D {
       this.ui.markInventoryDirty();
       if (harvest) {
         this.ui.floatPickup(
-          k, v, e.x, e.y, e.z, this.camera,
-          this.renderer.domElement.clientWidth,
-          this.renderer.domElement.clientHeight
+          k, v, e.x, e.y, e.z, this.camera, this._canvasW, this._canvasH
         );
       }
     }
@@ -760,8 +777,8 @@ export class Game3D {
     this.ui.updateInventory(this.inventory);
     this.ui.updateCompass(this.yaw);
     if (!CFG.ui.showWorldLabels) return;
-    const w = this.renderer.domElement.clientWidth;
-    const h = this.renderer.domElement.clientHeight;
+    const w = this._canvasW;
+    const h = this._canvasH;
     this.ui.updateWorldLabels(
       this.world.entities,
       this.focusTarget,
@@ -789,9 +806,9 @@ export class Game3D {
       this.duskWarned = false;
       this.ui.toast(`第 ${this.day} 天`, 'success');
     }
-    if (this.time < 0.18) this.phase = 'dawn';
-    else if (this.time < 0.58) this.phase = 'day';
-    else if (this.time < 0.78) this.phase = 'dusk';
+    if (this.time < 0.14) this.phase = 'dawn';
+    else if (this.time < 0.68) this.phase = 'day';
+    else if (this.time < 0.82) this.phase = 'dusk';
     else this.phase = 'night';
 
     if (this.phase === 'dusk' && prev !== 'dusk' && !this.duskWarned) {
@@ -801,17 +818,25 @@ export class Game3D {
   }
 
   _updateLighting() {
-    const presets = {
-      dawn: { sunY: 22, int: 0.75, bg: 0xf4a460, fog: 0xc9a227 },
-      day: { sunY: 55, int: 1.1, bg: 0x87ceeb, fog: 0x9ecae1 },
-      dusk: { sunY: 16, int: 0.55, bg: 0xc45c26, fog: 0x8b4513 },
-      night: { sunY: 10, int: 0.2, bg: 0x0a1020, fog: 0x12182a },
-    };
-    const pr = presets[this.phase] || presets.day;
+    const pr = CFG.lighting[this.phase] || CFG.lighting.day;
     this.sun.position.y = pr.sunY;
-    this.sun.intensity = pr.int;
+    this.sun.intensity = pr.sun;
+    this.ambient.intensity = pr.amb;
+    this.hemi.intensity = pr.hemi;
+    this.hemi.color.setHex(0xc8e4ff);
+    this.hemi.groundColor.setHex(this.phase === 'night' ? 0x4a6848 : 0x7ab86a);
     this.scene.background.setHex(pr.bg);
     this.scene.fog.color.setHex(pr.fog);
+    this.scene.fog.near = pr.fogNear;
+    this.scene.fog.far = pr.fogFar;
+    if (this.world?.ground?.material) {
+      this.world.ground.material.color.setHex(pr.ground);
+    }
+    if (this.world?.boundaryRing?.material) {
+      const ringColor = this.phase === 'night' ? 0x6a8a9a : 0x8fcf7a;
+      this.world.boundaryRing.material.color.setHex(ringColor);
+      this.world.boundaryRing.material.opacity = this.phase === 'night' ? 0.35 : 0.5;
+    }
   }
 
   _render() {
@@ -870,6 +895,8 @@ export class Game3D {
   _resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
+    this._canvasW = w;
+    this._canvasH = h;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);

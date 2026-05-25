@@ -8,10 +8,10 @@ const shared = {
   crownGeo: new THREE.ConeGeometry(1.1, 2.4, 4),
   rockGeo: new THREE.DodecahedronGeometry(0.75, 0),
   bushGeo: new THREE.SphereGeometry(0.55, 4, 4),
-  trunkMat: new THREE.MeshLambertMaterial({ color: 0x5c4033 }),
-  crownMat: new THREE.MeshLambertMaterial({ color: 0x2d6a3e }),
-  rockMat: new THREE.MeshLambertMaterial({ color: 0x6c757d }),
-  bushMat: new THREE.MeshLambertMaterial({ color: 0x40916c }),
+  trunkMat: new THREE.MeshLambertMaterial({ color: 0x6b4a32 }),
+  crownMat: new THREE.MeshLambertMaterial({ color: 0x4a9a52 }),
+  rockMat: new THREE.MeshLambertMaterial({ color: 0x8a949e }),
+  bushMat: new THREE.MeshLambertMaterial({ color: 0x58b878 }),
 };
 
 /** InstancedMesh 批量渲染，极大减少 draw call */
@@ -84,7 +84,7 @@ export class World3D {
 
     const ground = new THREE.Mesh(
       groundGeo,
-      new THREE.MeshLambertMaterial({ color: 0x3d5a3c, flatShading: true })
+      new THREE.MeshLambertMaterial({ color: CFG.lighting.day.ground, flatShading: true })
     );
     ground.rotation.x = -Math.PI / 2;
     this.scene.add(ground);
@@ -94,9 +94,9 @@ export class World3D {
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(half - 1.2, half, 48),
       new THREE.MeshBasicMaterial({
-        color: 0x4a6741,
+        color: 0x9ae878,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.55,
         side: THREE.DoubleSide,
         depthWrite: false,
       })

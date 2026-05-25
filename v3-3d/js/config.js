@@ -47,14 +47,21 @@ export const CFG = {
     smooth: 0.22,
   },
   ui: {
-    barsInterval: 0.14,
-    labelsInterval: 0.4,
+    barsInterval: 0.16,
+    labelsInterval: 0.45,
     showWorldLabels: false,
     focusMinDist: 1.8,
   },
   render: {
     dpr: 1,
     maxDt: 0.05,
+    exposure: 1.28,
+  },
+  lighting: {
+    dawn: { sunY: 38, sun: 1.05, amb: 0.78, hemi: 0.52, bg: 0xb8daf5, fog: 0xd8ecff, fogNear: 90, fogFar: 210, ground: 0x6faa65 },
+    day: { sunY: 68, sun: 1.5, amb: 0.92, hemi: 0.62, bg: 0xa8dcff, fog: 0xc8e6ff, fogNear: 100, fogFar: 230, ground: 0x78c868 },
+    dusk: { sunY: 32, sun: 1.0, amb: 0.72, hemi: 0.48, bg: 0xf5d8b0, fog: 0xfae8c8, fogNear: 85, fogFar: 200, ground: 0x6ea058 },
+    night: { sunY: 28, sun: 0.62, amb: 0.5, hemi: 0.38, bg: 0x4a6888, fog: 0x5a7898, fogNear: 75, fogFar: 175, ground: 0x527a50 },
   },
 };
 
