@@ -82,10 +82,7 @@ class ProceduralHuman {
   }
 }
 
-/**
- * Soldier GLTF 动画：仅用 AnimationMixer，不每帧重置骨骼。
- * 攻击/跳跃通过模型整体偏移 + 装备挂点表现，避免闪烁。
- */
+/**  locomotion 带迟滞，避免 Walk/Run 边界反复 crossFade 导致走路卡顿 */
 export class HumanCharacter {
   constructor() {
     this.group = new THREE.Group();
@@ -98,6 +95,7 @@ export class HumanCharacter {
     this.useGltf = false;
     this.attackTimer = 0;
     this.animState = '';
+    this.locoState = 'idle';
     this.phase = 'locomote';
     this._attackStarted = false;
   }
@@ -109,9 +107,7 @@ export class HumanCharacter {
       this.model.traverse((obj) => {
         if (obj.isSkinnedMesh) {
           obj.frustumCulled = false;
-          if (obj.material) {
-            obj.material.skinning = true;
-          }
+          if (obj.material) obj.material.skinning = true;
         }
       });
       this.model.rotation.y = Math.PI;
@@ -124,7 +120,7 @@ export class HumanCharacter {
         this.actions[clip.name] = action;
       }
       this.useGltf = true;
-      this._crossfadeTo('Idle', 0.01);
+      this._playLoco('Idle', 0.01);
     } catch {
       this.procedural = new ProceduralHuman();
       this.group.add(this.procedural.group);
@@ -132,30 +128,67 @@ export class HumanCharacter {
     this.loaded = true;
   }
 
-  _crossfadeTo(name, duration = 0.2) {
+  _pickLoco(speed, onGround) {
+    if (!onGround) return 'air';
+    let s = this.locoState;
+    if (s === 'air') s = speed > 1.1 ? (speed > 10.5 ? 'run' : 'walk') : 'idle';
+    if (s === 'idle') {
+      if (speed > 1.1) return speed > 10.5 ? 'run' : 'walk';
+      return 'idle';
+    }
+    if (s === 'walk') {
+      if (speed < 0.4) return 'idle';
+      if (speed > 11.5) return 'run';
+      return 'walk';
+    }
+    if (s === 'run') {
+      if (speed < 8.5) return speed < 0.4 ? 'idle' : 'walk';
+      return 'run';
+    }
+  }
+
+  _playLoco(name, duration = 0.18) {
     if (!this.useGltf || this.animState === name) return;
     const next = this.actions[name];
     if (!next) return;
     const prev = this.activeAction;
-
     next.enabled = true;
     next.setEffectiveWeight(1);
-
     if (prev && prev !== next) {
-      prev.crossFadeTo(next, duration, true);
+      prev.crossFadeTo(next, duration, false);
     }
     next.play();
-
     this.activeAction = next;
     this.animState = name;
+  }
+
+  _applyLocoAnim(speed, onGround) {
+    const pick = this._pickLoco(speed, onGround);
+    if (pick === 'air') {
+      this.locoState = 'air';
+      this._playLoco('Run', 0.12);
+      if (this.activeAction) this.activeAction.setEffectiveTimeScale(0.42);
+      return;
+    }
+    this.locoState = pick;
+    if (pick === 'run') {
+      this._playLoco('Run', 0.15);
+      if (this.activeAction) this.activeAction.setEffectiveTimeScale(1.04);
+    } else if (pick === 'walk') {
+      this._playLoco('Walk', 0.15);
+      if (this.activeAction) this.activeAction.setEffectiveTimeScale(1);
+    } else {
+      this._playLoco('Idle', 0.2);
+      if (this.activeAction) this.activeAction.setEffectiveTimeScale(1);
+    }
   }
 
   _startAttack() {
     this.phase = 'attack';
     this.attackTimer = 0.45;
     this._attackStarted = true;
-    this._crossfadeTo('Idle', 0.08);
-    if (this.activeAction) this.activeAction.setEffectiveTimeScale(0.1);
+    this._playLoco('Idle', 0.06);
+    if (this.activeAction) this.activeAction.setEffectiveTimeScale(0.12);
   }
 
   _attackVisual(progress) {
@@ -173,19 +206,16 @@ export class HumanCharacter {
 
   triggerLand() {}
 
-  update(dt, speed, onGround, attackPulse, equipmentMgr) {
+  update(animDt, speed, onGround, attackPulse, equipmentMgr) {
     if (!this.loaded) return;
-
-    const step = Math.min(dt, 0.05);
+    const step = animDt;
 
     if (this.procedural) {
       this.procedural.update(step, speed, onGround, attackPulse, !onGround);
       return;
     }
 
-    if (attackPulse && !this._attackStarted) {
-      this._startAttack();
-    }
+    if (attackPulse && !this._attackStarted) this._startAttack();
 
     if (this.phase === 'attack') {
       this.attackTimer -= step;
@@ -193,35 +223,17 @@ export class HumanCharacter {
       if (this.mixer) this.mixer.update(step);
       this._attackVisual(progress);
       equipmentMgr?.applyAttackPose(progress);
-
       if (this.attackTimer <= 0) {
-        this.phase = onGround ? 'locomote' : 'air';
+        this.phase = 'locomote';
         this._attackStarted = false;
         this._resetModelOffset();
         equipmentMgr?.resetPose();
-        if (this.activeAction) this.activeAction.setEffectiveTimeScale(1);
+        this.locoState = 'idle';
       }
       return;
     }
 
-    if (!onGround) {
-      this.phase = 'air';
-      this._crossfadeTo('Run', 0.15);
-      if (this.activeAction) this.activeAction.setEffectiveTimeScale(0.45);
-    } else {
-      this.phase = 'locomote';
-      if (speed > 9.5) {
-        this._crossfadeTo('Run', 0.2);
-        if (this.activeAction) this.activeAction.setEffectiveTimeScale(1.05);
-      } else if (speed > 0.55) {
-        this._crossfadeTo('Walk', 0.2);
-        if (this.activeAction) this.activeAction.setEffectiveTimeScale(1);
-      } else {
-        this._crossfadeTo('Idle', 0.25);
-        if (this.activeAction) this.activeAction.setEffectiveTimeScale(1);
-      }
-    }
-
+    this._applyLocoAnim(speed, onGround);
     if (this.mixer) this.mixer.update(step);
   }
 

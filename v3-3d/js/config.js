@@ -47,8 +47,8 @@ export const CFG = {
     smooth: 0.22,
   },
   ui: {
-    barsInterval: 0.16,
-    labelsInterval: 0.45,
+    barsInterval: 0.2,
+    labelsInterval: 0.5,
     showWorldLabels: false,
     focusMinDist: 1.8,
   },

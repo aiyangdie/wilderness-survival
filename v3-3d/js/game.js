@@ -60,7 +60,9 @@ export class Game3D {
     this._forward = new THREE.Vector3();
     this._right = new THREE.Vector3();
     this._rawMove = new THREE.Vector3();
-    this._shakeOff = new THREE.Vector3();
+    this._preyDistCache = Infinity;
+    this._preyDistTimer = 0;
+    this._nearColliders = null;
 
     this._initRenderer();
     this.ui = new GameUI();
@@ -97,7 +99,7 @@ export class Game3D {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, CFG.render.dpr));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMapping = THREE.LinearToneMapping;
     this.renderer.toneMappingExposure = CFG.render.exposure ?? 1.2;
     this.renderer.shadowMap.enabled = false;
     document.body.appendChild(this.renderer.domElement);
@@ -237,10 +239,10 @@ export class Game3D {
     }
 
     if (!this.paused) {
-      const dt = Math.min(rawDt, CFG.render.maxDt);
-      this._update(dt);
-      this.vfx?.update(dt);
-      this.ui.updateFloats(dt);
+      const logicDt = Math.min(rawDt, CFG.render.maxDt);
+      this._update(logicDt, rawDt);
+      this.vfx?.update(logicDt);
+      this.ui.updateFloats(logicDt);
     }
 
     this._render();
@@ -248,11 +250,12 @@ export class Game3D {
     this.rafId = requestAnimationFrame(() => this._loop());
   }
 
-  _update(dt) {
+  _update(dt, animDt = dt) {
     const p = this.player;
     if (!p.alive) return;
 
     if (this.craftOpen) return;
+    this._animDt = animDt;
 
     if (this.input.yawDelta) this.yaw += this.input.yawDelta;
     if (this.input.pitchDelta) {
@@ -372,8 +375,13 @@ export class Game3D {
     const p = this.player;
     const run = this.input.wantsSprint() && p.stamina > 8;
     let speed = run ? CFG.player.runSpeed : CFG.player.walkSpeed;
-    const preyDist = this._nearestPassiveDist();
-    if (run && preyDist < 14 && preyDist > 0.8) {
+
+    this._preyDistTimer -= dt;
+    if (this._preyDistTimer <= 0) {
+      this._preyDistCache = this._nearestPassiveDist();
+      this._preyDistTimer = 0.3;
+    }
+    if (run && this._preyDistCache < 14 && this._preyDistCache > 0.8) {
       speed *= CFG.player.sprintBonusNearPrey ?? 1.12;
     }
     if (run) p.stamina = Math.max(0, p.stamina - 14 * dt);
@@ -385,6 +393,8 @@ export class Game3D {
     const hasMove = this.input.getMoveVector(this._rawMove);
     let moving = false;
 
+    this._nearColliders = this.world.getNearbyColliders(p.x, p.z, 11);
+
     if (hasMove) {
       this._moveDir
         .copy(this._forward).multiplyScalar(-this._rawMove.z)
@@ -393,7 +403,9 @@ export class Game3D {
         this._moveDir.normalize();
         const nx = p.x + this._moveDir.x * speed * dt;
         const nz = p.z + this._moveDir.z * speed * dt;
-        const resolved = this.world.resolveCircleMove(p.x, p.z, nx, nz, 0.55);
+        const resolved = this.world.resolveCircleMove(
+          p.x, p.z, nx, nz, 0.55, this._nearColliders
+        );
         p.x = resolved.x;
         p.z = resolved.z;
         if (resolved.hitEdge) {
@@ -408,7 +420,8 @@ export class Game3D {
       }
     }
 
-    const groundY = this.world.getHeightAt(p.x, p.z);
+    p.groundY = this.world.getHeightAt(p.x, p.z);
+    const groundY = p.groundY;
 
     if (this.input.justPressed('Space') && (p.onGround || this.coyoteTimer > 0)) {
       p.vy = CFG.player.jumpForce;
@@ -425,8 +438,7 @@ export class Game3D {
         p.onGround = true;
       }
     } else {
-      p.y = THREE.MathUtils.lerp(p.y, groundY, Math.min(1, dt * 18));
-      if (Math.abs(p.y - groundY) < 0.05) p.y = groundY;
+      p.y = groundY;
     }
 
     if (p.onGround && !this.wasOnGround) this.human.triggerLand();
@@ -440,7 +452,7 @@ export class Game3D {
     }
 
     this.human.setPosition(p.x, p.y, p.z);
-    this.human.update(dt, moving ? speed : 0, p.onGround, this._attackPulse, this.equipment);
+    this.human.update(this._animDt ?? dt, moving ? speed : 0, p.onGround, this._attackPulse, this.equipment);
     if (this._attackPulse) this._attackPulse = false;
     return run && moving;
   }
@@ -698,6 +710,7 @@ export class Game3D {
       this.world.colliders = this.world.colliders.filter(
         (c) => Math.abs(c.x - e.x) > 0.1 || Math.abs(c.z - e.z) > 0.1
       );
+      this.world.invalidateColliderCache();
     }
     const drops = e.def?.drop || {};
     for (const [k, v] of Object.entries(drops)) {
@@ -769,13 +782,13 @@ export class Game3D {
       this._lastFocusKey = '';
       this.vfx.setFocus(0, 0, 0, 'neutral', false);
     }
-    this.ui.updateEquipment(this.equipment?.slots);
   }
 
   _refreshUISlow() {
     const p = this.player;
     this.ui.updateInventory(this.inventory);
     this.ui.updateCompass(this.yaw);
+    this.ui.updateEquipment(this.equipment?.slots);
     if (!CFG.ui.showWorldLabels) return;
     const w = this._canvasW;
     const h = this._canvasH;
@@ -854,6 +867,8 @@ export class Game3D {
     if (this.world) {
       const gy = this.world.getHeightAt(this._camDesired.x, this._camDesired.z);
       this._camDesired.y = Math.max(this._camDesired.y, gy + 1.2);
+    } else if (this.player.groundY != null) {
+      this._camDesired.y = Math.max(this._camDesired.y, this.player.groundY + 1.2);
     }
 
     const smooth = this.paused ? 0.08 : cam.smooth;
@@ -876,7 +891,6 @@ export class Game3D {
 
     this.sun.position.set(p.x + 35, this.sun.position.y, p.z + 25);
     this.sun.target.position.set(p.x, p.y, p.z);
-    this.sun.target.updateMatrixWorld();
 
     this.renderer.render(this.scene, this.camera);
   }

@@ -20,7 +20,7 @@ class PropBatch {
     this.mesh = new THREE.InstancedMesh(geo, mat, max);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.count = 0;
-    this.mesh.frustumCulled = true;
+    this.mesh.frustumCulled = false;
     scene.add(this.mesh);
     this.max = max;
     this.count = 0;
@@ -232,10 +232,11 @@ export class World3D {
     return Math.abs(x) > half - pad || Math.abs(z) > half - pad;
   }
 
-  resolveCircleMove(px, pz, nx, nz, radius) {
+  resolveCircleMove(px, pz, nx, nz, radius, colliders = null) {
     let x = nx;
     let z = nz;
-    for (const c of this.colliders) {
+    const list = colliders ?? this.colliders;
+    for (const c of list) {
       const dx = x - c.x;
       const dz = z - c.z;
       const dist = Math.hypot(dx, dz);
@@ -248,6 +249,27 @@ export class World3D {
     }
     const c = this.clampInBounds(x, z, radius);
     return { x: c.x, z: c.z, hitEdge: c.hitEdge };
+  }
+
+  /** 只检测玩家附近的碰撞体，避免每帧遍历全部树木 */
+  getNearbyColliders(px, pz, pad = 11) {
+    const moved = Math.abs(px - (this._ccX ?? 9999)) > 3 || Math.abs(pz - (this._ccZ ?? 9999)) > 3;
+    if (!moved && this._colliderCache) return this._colliderCache;
+
+    this._ccX = px;
+    this._ccZ = pz;
+    const out = [];
+    for (const c of this.colliders) {
+      const dx = Math.abs(c.x - px);
+      const dz = Math.abs(c.z - pz);
+      if (dx + dz < pad + c.r + 1.5) out.push(c);
+    }
+    this._colliderCache = out;
+    return out;
+  }
+
+  invalidateColliderCache() {
+    this._colliderCache = null;
   }
 
   spawnNightMonsters() {
