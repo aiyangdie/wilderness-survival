@@ -3,6 +3,7 @@ export const CFG = {
   terrainSegments: 48,
   daySeconds: 180,
   entityCullDist: 55,
+  spawnInvuln: 4,
   player: {
     walkSpeed: 7,
     runSpeed: 12,
@@ -15,6 +16,8 @@ export const CFG = {
     attackCooldown: 0.4,
     interactRange: 4.2,
     interactDamage: 16,
+    catchRange: 3.2,
+    catchHpRatio: 0.45,
     coyoteTime: 0.12,
   },
   decay: { hunger: 0.2, thirst: 0.32 },
@@ -26,6 +29,9 @@ export const CFG = {
     sensY: 0.002,
     smooth: 0.16,
   },
+  craft: {
+    cooked_meat: { meat: 1, wood: 1 },
+  },
 };
 
 export const ITEMS = {
@@ -33,6 +39,7 @@ export const ITEMS = {
   stone: { icon: '🪨', name: '石头' },
   fiber: { icon: '🌿', name: '纤维' },
   meat: { icon: '🥩', name: '生肉' },
+  cooked_meat: { icon: '🍖', name: '熟肉' },
 };
 
 export const ENTITY_LABELS = {
@@ -48,7 +55,7 @@ export const ENTITY_LABELS = {
 export const RESOURCES = {
   tree: { hp: 50, drop: { wood: 3 }, color: 0x2d6a3e, radius: 1.3, verb: '砍伐' },
   rock: { hp: 60, drop: { stone: 2 }, color: 0x6c757d, radius: 1.0, verb: '开采' },
-  bush: { hp: 20, drop: { fiber: 2 }, color: 0x40916c, radius: 0.8, verb: '采集' },
+  bush: { hp: 20, drop: { fiber: 2 }, color: 0x40916c, radius: 0.8, verb: '采集', drink: 18 },
 };
 
 export const CREATURES = {

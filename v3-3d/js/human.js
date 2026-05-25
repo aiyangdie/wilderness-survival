@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 
-/** 程序化拟真人体（头、躯干、四肢 + 行走动画） */
+/** 程序化拟真人体 + 呼吸/落地细节 */
 export class HumanCharacter {
   constructor() {
     this.group = new THREE.Group();
     this.meshParts = {};
     this.walkPhase = 0;
-    this.velocity = new THREE.Vector3();
+    this.idlePhase = Math.random() * Math.PI * 2;
+    this.landSquash = 0;
 
     const skin = new THREE.MeshStandardMaterial({ color: 0xe8b4a0, roughness: 0.65 });
     const shirt = new THREE.MeshStandardMaterial({ color: 0x3d5a80, roughness: 0.7 });
@@ -18,59 +19,75 @@ export class HumanCharacter {
     this.group.add(torso);
     this.meshParts.torso = torso;
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 16), skin);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), skin);
     head.position.y = 1.65;
     this.group.add(head);
+    this.meshParts.head = head;
 
-    const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(0.23, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), hair);
+    const hairMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.23, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      hair
+    );
     hairMesh.position.y = 1.72;
     this.group.add(hairMesh);
 
-    this.meshParts.leftLeg = this._limb(0.14, 0.55, pants, -0.14, 0.55, 'leg');
-    this.meshParts.rightLeg = this._limb(0.14, 0.55, pants, 0.14, 0.55, 'leg');
-    this.meshParts.leftArm = this._limb(0.1, 0.45, skin, -0.38, 1.25, 'arm');
-    this.meshParts.rightArm = this._limb(0.1, 0.45, skin, 0.38, 1.25, 'arm');
+    this.meshParts.leftLeg = this._limb(0.14, 0.55, pants, -0.14, 0.55);
+    this.meshParts.rightLeg = this._limb(0.14, 0.55, pants, 0.14, 0.55);
+    this.meshParts.leftArm = this._limb(0.1, 0.45, skin, -0.38, 1.25);
+    this.meshParts.rightArm = this._limb(0.1, 0.45, skin, 0.38, 1.25);
 
-    this.group.position.y = 0;
+    this.baseTorsoY = 1.15;
+    this.baseHeadY = 1.65;
   }
 
-  _limb(w, h, mat, x, pivotY, type) {
+  _limb(w, h, mat, x, pivotY) {
     const pivot = new THREE.Group();
     pivot.position.set(x, pivotY, 0);
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * 0.8), mat);
     mesh.position.y = -h / 2;
     pivot.add(mesh);
     this.group.add(pivot);
-    pivot.userData.limbType = type;
     return pivot;
   }
 
-  update(dt, speed, onGround, isAttacking) {
+  triggerLand() {
+    this.landSquash = 0.18;
+  }
+
+  update(dt, speed, onGround, isAttacking, justLanded = false) {
+    if (justLanded) this.triggerLand();
+    if (this.landSquash > 0) this.landSquash = Math.max(0, this.landSquash - dt * 2.2);
+
     const moving = speed > 0.5;
     if (moving && onGround) {
-      this.walkPhase += dt * (speed > 7 ? 14 : 9);
-      const swing = Math.sin(this.walkPhase) * (speed > 7 ? 0.65 : 0.45);
+      this.walkPhase += dt * (speed > 9 ? 14 : 9);
+      const swing = Math.sin(this.walkPhase) * (speed > 9 ? 0.65 : 0.45);
       this.meshParts.leftLeg.rotation.x = swing;
       this.meshParts.rightLeg.rotation.x = -swing;
-      this.meshParts.leftArm.rotation.x = -swing * 0.6;
-      this.meshParts.rightArm.rotation.x = swing * 0.6;
-    } else {
-      this.meshParts.leftLeg.rotation.x *= 0.85;
-      this.meshParts.rightLeg.rotation.x *= 0.85;
-      this.meshParts.leftArm.rotation.x *= 0.85;
-      this.meshParts.rightArm.rotation.x *= 0.85;
+      this.meshParts.leftArm.rotation.x = -swing * 0.55;
+      this.meshParts.rightArm.rotation.x = swing * 0.55;
+    } else if (onGround) {
+      this.idlePhase += dt * 1.8;
+      const breath = Math.sin(this.idlePhase) * 0.03;
+      this.meshParts.leftLeg.rotation.x *= 0.9;
+      this.meshParts.rightLeg.rotation.x *= 0.9;
+      this.meshParts.leftArm.rotation.x = breath * 2;
+      this.meshParts.rightArm.rotation.x = -breath * 2;
     }
 
     if (isAttacking) {
-      this.meshParts.rightArm.rotation.x = -1.2;
-      this.meshParts.torso.rotation.y = 0.2;
+      this.meshParts.rightArm.rotation.x = -1.25;
+      this.meshParts.torso.rotation.y = 0.22;
     } else {
       this.meshParts.torso.rotation.y *= 0.88;
       if (Math.abs(this.meshParts.torso.rotation.y) < 0.02) this.meshParts.torso.rotation.y = 0;
     }
 
-    const bob = moving ? Math.abs(Math.sin(this.walkPhase * 2)) * 0.04 : 0;
-    this.meshParts.torso.position.y = 1.15 + bob;
+    const bob = moving ? Math.abs(Math.sin(this.walkPhase * 2)) * 0.05 : 0;
+    const squash = this.landSquash * 0.12;
+    this.meshParts.torso.position.y = this.baseTorsoY + bob - squash;
+    this.meshParts.head.position.y = this.baseHeadY + bob * 0.5 - squash;
+    this.meshParts.torso.scale.y = 1 - squash * 0.5;
   }
 
   setPosition(x, y, z) {

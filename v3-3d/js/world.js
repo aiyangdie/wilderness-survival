@@ -221,10 +221,41 @@ export class World3D {
     return best ? this._wrapTarget(best, bestD, 'resource') : null;
   }
 
+  getCatchable(px, pz, range, hpRatio) {
+    let best = null;
+    let bestD = range;
+    for (const e of this.entities) {
+      if (e.dead || !e.passive) continue;
+      if (e.hp > e.maxHp * hpRatio) continue;
+      const d = this._dist(px, pz, e);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    return best ? this._wrapTarget(best, bestD, 'catch') : null;
+  }
+
+  getNearestBush(px, pz, range) {
+    let best = null;
+    let bestD = range;
+    for (const e of this.entities) {
+      if (e.dead || e.type !== 'bush') continue;
+      const d = this._dist(px, pz, e);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    return best ? this._wrapTarget(best, bestD, 'resource') : null;
+  }
+
   /** UI 用：最近可交互/可攻击目标 */
   getFocusTarget(px, pz, interactRange, attackRange, isNight) {
-    const interact = this.getInteractable(px, pz, interactRange);
+    const catchT = this.getCatchable(px, pz, CFG.player.catchRange, CFG.player.catchHpRatio);
     const attack = this.getAttackTarget(px, pz, attackRange, isNight);
+    const interact = this.getInteractable(px, pz, interactRange);
+    if (catchT) return catchT;
     if (attack && attack.dist < 3.2) return attack;
     if (interact) return interact;
     if (attack) return attack;

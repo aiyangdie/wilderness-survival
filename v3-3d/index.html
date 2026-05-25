@@ -8,6 +8,9 @@
 </head>
 <body>
   <div id="damage-flash"></div>
+  <div id="low-health-vignette"></div>
+  <div id="world-labels"></div>
+  <div id="float-layer"></div>
 
   <header id="hud" class="hud hidden">
     <div class="hud-left">
@@ -42,12 +45,18 @@
       <div class="day-cycle">
         <div id="day-progress" class="day-fill"></div>
       </div>
+      <div id="compass" title="方向（相对北）">
+        <div id="compass-arrow">▲</div>
+        <span class="compass-n">N</span>
+      </div>
       <a class="back" href="../">← 返回</a>
     </div>
   </header>
 
+  <div id="spawn-shield"></div>
   <div id="crosshair" aria-hidden="true"><span></span></div>
   <div id="interact-prompt"></div>
+  <div id="interact-progress-wrap"><div id="interact-progress"></div></div>
 
   <footer id="hud-bottom" class="hud hidden">
     <div id="inventory-bar"></div>
@@ -66,7 +75,8 @@
         <div><kbd>空格</kbd><span>跳跃</span></div>
         <div><kbd>鼠标</kbd><span>转动视角</span></div>
         <div><kbd>左键</kbd><span>攻击敌人 / 狩猎</span></div>
-        <div><kbd>E</kbd> / <kbd>F</kbd><span>采集资源 / 食用</span></div>
+        <div><kbd>E</kbd> / <kbd>F</kbd><span>采集 / 捕获 / 食用</span></div>
+        <div><kbd>C</kbd><span>烤肉（生肉+木材）</span></div>
         <div><kbd>Esc</kbd><span>暂停菜单</span></div>
         <div><kbd>Tab</kbd><span>显示/隐藏背包栏</span></div>
       </div>

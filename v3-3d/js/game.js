@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { CFG, CREATURES, RESOURCES, ENTITY_LABELS } from './config.js';
+import { CFG, CREATURES, RESOURCES, ENTITY_LABELS, ITEMS } from './config.js';
 import { HumanCharacter } from './human.js';
 import { World3D } from './world.js';
 import { GameInput } from './input.js';
 import { GameUI } from './ui.js';
+import { VfxManager } from './effects.js';
 
 const PHASE_LABELS = {
   dawn: '🌅 清晨',
@@ -24,8 +25,12 @@ export class Game3D {
     this.attackAnimTimer = 0;
     this.coyoteTimer = 0;
     this.invShow = true;
-    this.lastDamageFlash = 0;
     this.prevHealth = 100;
+    this.wasOnGround = true;
+    this.spawnInvuln = 0;
+    this.duskWarned = false;
+    this.footstepTimer = 0;
+    this.camShake = 0;
 
     this.yaw = 0;
     this.pitch = 0.25;
@@ -37,11 +42,13 @@ export class Game3D {
     this._forward = new THREE.Vector3();
     this._right = new THREE.Vector3();
     this._rawMove = new THREE.Vector3();
+    this._shakeOff = new THREE.Vector3();
 
     this._initRenderer();
     this.ui = new GameUI();
     this.input = new GameInput(this.canvas, () => this.togglePause());
     this.ui.bindPauseControls(this.input, () => this.togglePause(false));
+    this.vfx = null;
 
     this.player = this._newPlayer();
     this.inventory = { wood: 5, fiber: 3 };
@@ -101,9 +108,7 @@ export class Game3D {
     this.input.setPaused(next);
     this.ui.showPause(next);
     this.ui.setPointerHint(this.input.mouseLocked, next);
-    if (!next && !this.input.mouseLocked) {
-      this.canvas.requestPointerLock();
-    }
+    if (!next && !this.input.mouseLocked) this.canvas.requestPointerLock();
   }
 
   start() {
@@ -118,6 +123,7 @@ export class Game3D {
 
     this.world = new World3D(this.scene);
     this.world.generate();
+    this.vfx = new VfxManager(this.scene);
     this.human = new HumanCharacter();
     this.scene.add(this.human.group);
 
@@ -129,10 +135,13 @@ export class Game3D {
     this.time = 0;
     this.phase = 'day';
     this.nightSpawned = false;
+    this.duskWarned = false;
     this.yaw = 0;
     this.pitch = 0.25;
     this.interactCooldown = 0;
     this.prevHealth = 100;
+    this.spawnInvuln = CFG.spawnInvuln;
+    this.wasOnGround = true;
     this._camPos.set(0, 0, 0);
     this.clock.getDelta();
 
@@ -144,7 +153,7 @@ export class Game3D {
     this.input.setEnabled(true);
     this.input.setPaused(false);
     setTimeout(() => this.canvas.requestPointerLock(), 100);
-    this.ui.toast('点击画面锁定鼠标 · Esc 暂停', 'info');
+    this.ui.toast('🛡️ 开局保护 4 秒 · C 键烤肉', 'info');
     this._loop();
   }
 
@@ -152,6 +161,8 @@ export class Game3D {
     if (!this.running) return;
     const dt = Math.min(this.clock.getDelta(), 1 / 30);
     if (!this.paused) this._update(dt);
+    else this.ui.updateFloats(dt);
+    this.vfx?.update(dt);
     this._render();
     this.input.endFrame();
     this.rafId = requestAnimationFrame(() => this._loop());
@@ -170,9 +181,10 @@ export class Game3D {
       this.invShow = !this.invShow;
       document.getElementById('hud-bottom').classList.toggle('hidden', !this.invShow);
     }
+    if (this.input.justPressed('KeyC')) this._craft();
 
     this._updateTime(dt);
-    this._updatePlayer(dt);
+    const sprinting = this._updatePlayer(dt);
     this._updateEntities(dt);
     this._updateLighting();
 
@@ -182,10 +194,11 @@ export class Game3D {
 
     if (p.health < this.prevHealth - 0.5) {
       this.ui.flashDamage();
-      this.lastDamageFlash = 0.3;
+      this.camShake = 0.15;
     }
     this.prevHealth = p.health;
 
+    if (this.spawnInvuln > 0) this.spawnInvuln -= dt;
     if (p.invuln > 0) p.invuln -= dt;
     if (p.attackCd > 0) p.attackCd -= dt;
     if (this.interactCooldown > 0) this.interactCooldown -= dt;
@@ -195,16 +208,18 @@ export class Game3D {
     }
     if (p.onGround) this.coyoteTimer = CFG.player.coyoteTime;
     else this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
+    if (this.camShake > 0) this.camShake = Math.max(0, this.camShake - dt * 2);
 
     if (this.input.clickAttack) this._attack();
     if (this.input.wantsInteract()) this._interact();
 
     if (p.health <= 0) this._gameOver();
 
+    this.ui.updateFloats(dt);
     this.hudTimer += dt;
-    if (this.hudTimer >= 0.08) {
+    if (this.hudTimer >= 0.06) {
       this.hudTimer = 0;
-      this._refreshUI();
+      this._refreshUI(sprinting);
     }
   }
 
@@ -258,13 +273,26 @@ export class Game3D {
       if (Math.abs(p.y - groundY) < 0.05) p.y = groundY;
     }
 
+    if (p.onGround && !this.wasOnGround) this.human.triggerLand();
+    this.wasOnGround = p.onGround;
+
+    if (moving && p.onGround) {
+      this.footstepTimer -= dt;
+      if (this.footstepTimer <= 0) {
+        this.vfx.dust(p.x, p.y, p.z);
+        this.footstepTimer = run ? 0.28 : 0.42;
+      }
+    }
+
     this.human.setPosition(p.x, p.y, p.z);
     this.human.update(dt, moving ? speed : 0, p.onGround, this.isAttacking);
+    return run && moving;
   }
 
   _updateEntities(dt) {
     const p = this.player;
     const isNight = this.phase === 'night';
+    const protectedSpawn = this.spawnInvuln > 0;
 
     if (isNight && !this.nightSpawned) {
       this.world.spawnNightMonsters();
@@ -287,8 +315,8 @@ export class Game3D {
         if (dist < (def.aggro || 20) && dist > 0.5) {
           e.x += (dx / dist) * def.speed * dt;
           e.z += (dz / dist) * def.speed * dt;
-          if (dist < 2.5 && p.invuln <= 0) {
-            p.health -= (def.damage || 10) * dt * 1.6;
+          if (dist < 2.5 && p.invuln <= 0 && !protectedSpawn) {
+            p.health -= (def.damage || 10) * dt * 1.5;
             p.invuln = 0.55;
           }
         }
@@ -321,11 +349,19 @@ export class Game3D {
     this.attackAnimTimer = 0.32;
 
     const e = target.entity;
-    e.hp -= CFG.player.attackDamage;
+    const dmg = CFG.player.attackDamage;
+    e.hp -= dmg;
+
+    const col = e.def?.hostile ? 0xff4444 : 0xffcc66;
+    this.vfx.burst(e.x, e.y, e.z, col, 8);
+    this.vfx.slash(p.x, p.y, p.z, this.human.group.rotation.y);
+    this.ui.floatDamage(
+      e.x, e.y, e.z, dmg, this.camera, this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight
+    );
+
     if (e.hp <= 0) {
       this._killEntity(e, false);
-      const name = ENTITY_LABELS[e.type] || e.type;
-      this.ui.toast(`击败了 ${name}`, 'success');
+      this.ui.toast(`击败了 ${ENTITY_LABELS[e.type] || e.type}`, 'success');
     }
   }
 
@@ -333,31 +369,72 @@ export class Game3D {
     if (this.interactCooldown > 0) return;
     const p = this.player;
 
+    const catchT = this.world.getCatchable(
+      p.x, p.z, CFG.player.catchRange, CFG.player.catchHpRatio
+    );
+    if (catchT) {
+      this._killEntity(catchT.entity, true);
+      this.interactCooldown = 0.5;
+      this.vfx.burst(catchT.entity.x, catchT.entity.y, catchT.entity.z, 0xa8dadc, 6);
+      this.ui.toast(`捕获了 ${ENTITY_LABELS[catchT.type] || catchT.type}`, 'success');
+      p.score += 18;
+      return;
+    }
+
+    const bush = this.world.getNearestBush(p.x, p.z, 2.8);
+    if (bush && p.thirst < 88) {
+      this.interactCooldown = 0.6;
+      p.thirst = Math.min(100, p.thirst + (bush.def?.drink || 15));
+      this.ui.toast('从灌木丛取水饮用', 'success');
+      return;
+    }
+
     const target = this.world.getInteractable(p.x, p.z, CFG.player.interactRange);
     if (target) {
-      this.interactCooldown = 0.32;
+      this.interactCooldown = 0.3;
       const e = target.entity;
       e.hp -= CFG.player.interactDamage;
+      this.vfx.burst(e.x, e.y, e.z, 0x8fbc8f, 4);
       if (e.hp <= 0) {
         this._killEntity(e, true);
-        const name = ENTITY_LABELS[e.type] || e.type;
-        this.ui.toast(`${target.def?.verb || '采集'}${name} 完成`, 'success');
-      } else {
-        const pct = Math.ceil((e.hp / e.maxHp) * 100);
-        this.ui.toast(`继续… 剩余 ${pct}%`, 'info');
+        this.ui.toast(`${target.def?.verb || '采集'}${ENTITY_LABELS[e.type] || e.type} 完成`, 'success');
       }
+      return;
+    }
+
+    if ((this.inventory.cooked_meat || 0) > 0) {
+      this.interactCooldown = 0.55;
+      this.inventory.cooked_meat--;
+      p.hunger = Math.min(100, p.hunger + 42);
+      p.health = Math.min(100, p.health + 12);
+      this.ui.toast('食用熟肉', 'success');
       return;
     }
 
     if ((this.inventory.meat || 0) > 0) {
       this.interactCooldown = 0.55;
       this.inventory.meat--;
-      p.hunger = Math.min(100, p.hunger + 30);
-      p.health = Math.min(100, p.health + 5);
-      this.ui.toast('食用生肉（建议烤肉）', 'warn');
-    } else {
-      this.ui.toast('附近没有可交互的资源', 'warn');
+      p.hunger = Math.min(100, p.hunger + 22);
+      p.health = Math.max(0, p.health - 4);
+      this.ui.toast('食用生肉（建议按 C 烤肉）', 'warn');
+      return;
     }
+
+    this.ui.toast('附近没有可交互目标', 'warn');
+  }
+
+  _craft() {
+    const need = CFG.craft.cooked_meat;
+    const inv = this.inventory;
+    if ((inv.meat || 0) < need.meat || (inv.wood || 0) < need.wood) {
+      this.ui.toast('烤肉需要：生肉×1 + 木材×1', 'warn');
+      return;
+    }
+    inv.meat -= need.meat;
+    inv.wood -= need.wood;
+    inv.cooked_meat = (inv.cooked_meat || 0) + 1;
+    this.ui.toast('🍖 烤肉完成（按 E 食用）', 'success');
+    this.player.score += 5;
   }
 
   _killEntity(e, harvest) {
@@ -368,8 +445,16 @@ export class Game3D {
         (c) => Math.abs(c.x - e.x) > 0.1 || Math.abs(c.z - e.z) > 0.1
       );
     }
-    for (const [k, v] of Object.entries(e.def?.drop || {})) {
+    const drops = e.def?.drop || {};
+    for (const [k, v] of Object.entries(drops)) {
       this.inventory[k] = (this.inventory[k] || 0) + v;
+      if (harvest) {
+        this.ui.floatPickup(
+          k, v, e.x, e.y, e.z, this.camera,
+          this.renderer.domElement.clientWidth,
+          this.renderer.domElement.clientHeight
+        );
+      }
     }
     if (!harvest) {
       this.player.score += e.type === 'shadow' ? 35 : e.type === 'wolf' ? 22 : 10;
@@ -378,39 +463,65 @@ export class Game3D {
     }
   }
 
-  _refreshUI() {
+  _refreshUI(sprinting) {
     const p = this.player;
-    this.ui.updateBars(p);
-    this.ui.updateMeta(this.day, PHASE_LABELS[this.phase] || '', this.time, p.score);
+    this.ui.updateBars(p, sprinting);
+    this.ui.updateMeta(this.day, PHASE_LABELS[this.phase] || '', this.time, p.score, this.phase);
     this.ui.updateInventory(this.inventory);
+    this.ui.updateCompass(this.yaw);
+    this.ui.updateSpawnShield(this.spawnInvuln);
     this.ui.setPointerHint(this.input.mouseLocked, this.paused);
 
     const focus = this.world.getFocusTarget(
       p.x, p.z, CFG.player.interactRange, CFG.player.attackRange, this.phase === 'night'
     );
+
     const prompt = this.ui.getTargetPrompt(focus, this.inventory);
     if (prompt && this.input.mouseLocked) {
-      this.ui.setInteractPrompt(prompt.text, prompt.mode);
-      this.ui.setCrosshairMode(prompt.mode === 'danger' ? 'danger' : prompt.mode);
+      this.ui.setInteractPrompt(prompt.text, prompt.mode, prompt.hpRatio);
+      const chMode = prompt.mode === 'danger' ? 'danger' : prompt.mode;
+      this.ui.setCrosshairMode(chMode, this.isAttacking);
     } else {
-      this.ui.setInteractPrompt(null);
-      this.ui.setCrosshairMode('neutral');
+      this.ui.clearInteractPrompt();
+      this.ui.setCrosshairMode('neutral', this.isAttacking);
     }
+
+    if (focus?.entity && !focus.entity.dead) {
+      const fe = focus.entity;
+      this.vfx.setFocus(fe.x, fe.y, fe.z, prompt?.mode || 'neutral', true);
+    } else {
+      this.vfx.setFocus(0, 0, 0, 'neutral', false);
+    }
+
+    this.ui.updateWorldLabels(
+      this.world.entities,
+      focus,
+      this.camera,
+      this.renderer.domElement.clientWidth,
+      this.renderer.domElement.clientHeight
+    );
   }
 
   _updateTime(dt) {
+    const prev = this.phase;
     this.time += dt / CFG.daySeconds;
     if (this.time >= 1) {
       this.time = 0;
       this.day += 1;
       this.player.score += 50;
       this.nightSpawned = false;
+      this.duskWarned = false;
       this.ui.toast(`第 ${this.day} 天`, 'success');
     }
     if (this.time < 0.18) this.phase = 'dawn';
     else if (this.time < 0.58) this.phase = 'day';
     else if (this.time < 0.78) this.phase = 'dusk';
     else this.phase = 'night';
+
+    if (this.phase === 'dusk' && prev !== 'dusk' && !this.duskWarned) {
+      this.duskWarned = true;
+      this.ui.toast('黄昏将至，快准备抵御黑夜！', 'warn');
+    }
   }
 
   _updateLighting() {
@@ -447,6 +558,15 @@ export class Game3D {
     const smooth = this.paused ? 0.08 : cam.smooth;
     if (this._camPos.lengthSq() < 0.01) this._camPos.copy(this._camDesired);
     this._camPos.lerp(this._camDesired, smooth);
+
+    if (this.camShake > 0) {
+      this._shakeOff.set(
+        (Math.random() - 0.5) * this.camShake,
+        (Math.random() - 0.5) * this.camShake * 0.5,
+        (Math.random() - 0.5) * this.camShake
+      );
+      this._camPos.add(this._shakeOff);
+    }
 
     this._camTarget.set(p.x, p.y + CFG.player.height * 0.85, p.z);
     this.camera.position.copy(this._camPos);

@@ -279,6 +279,196 @@ canvas {
 #toast.type-warn { border-color: var(--warn); }
 #toast.type-danger { border-color: var(--danger); }
 
+/* ---- 低生命 / 开局保护 ---- */
+#low-health-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 35%, rgba(120, 10, 10, 0.55) 100%);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+#low-health-vignette.active { opacity: 1; }
+
+#spawn-shield {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 14;
+  padding: 6px 14px;
+  background: rgba(61, 90, 128, 0.9);
+  border: 1px solid var(--mana);
+  border-radius: 20px;
+  font-size: 0.85rem;
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+
+#spawn-shield.show { opacity: 1; }
+
+/* ---- 指南针 ---- */
+#compass {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  margin: 8px 0 4px auto;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+#compass-arrow {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--accent);
+  transform-origin: center center;
+}
+
+.compass-n {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.55rem;
+  color: var(--muted);
+}
+
+.stat-bar.dim { opacity: 0.45; }
+
+.day-cycle.phase-night .day-fill {
+  filter: brightness(1.2);
+}
+
+/* ---- 准星攻击 ---- */
+#crosshair.attack span {
+  transform: scale(1.35);
+  border-width: 3px;
+}
+
+#crosshair[data-mode="catch"] span { border-color: var(--warn); }
+
+/* ---- 交互进度 ---- */
+#interact-progress-wrap {
+  position: fixed;
+  left: 50%;
+  bottom: calc(22% - 14px);
+  transform: translateX(-50%);
+  width: 160px;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  opacity: 0;
+  z-index: 12;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#interact-progress-wrap:has(#interact-progress.show),
+#interact-prompt.show + #interact-progress-wrap {
+  opacity: 0;
+}
+
+#interact-progress {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s;
+}
+
+#interact-progress.show {
+  display: block;
+}
+
+#interact-prompt.mode-catch { border-color: var(--warn); color: #ffe6b3; }
+
+/* 进度条在 prompt show 时由 JS 控制 interact-progress-wrap - fix html structure */
+
+#interact-progress-wrap.visible {
+  opacity: 1;
+}
+
+#interact-progress-wrap #interact-progress {
+  width: 0%;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* ---- 世界标签 ---- */
+#world-labels {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.world-label {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  text-align: center;
+  font-size: 0.65rem;
+  color: #e8eef5;
+  text-shadow: 0 1px 3px #000;
+  min-width: 48px;
+}
+
+.world-label .wl-name { display: block; margin-bottom: 2px; }
+
+.world-label .wl-bar {
+  height: 4px;
+  width: 48px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.world-label .wl-fill {
+  height: 100%;
+  background: var(--accent);
+  width: 100%;
+}
+
+.world-label.hostile .wl-fill { background: var(--danger); }
+.world-label.focus .wl-name { color: var(--accent); font-weight: 600; }
+
+/* ---- 浮动文字 ---- */
+#float-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 13;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.float-text {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-weight: 700;
+  font-size: 1rem;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+}
+
+.float-text.damage { color: #ff6b6b; font-size: 1.1rem; }
+.float-text.pickup { color: #3ecf8e; }
+
+.inv-chip small {
+  display: block;
+  font-size: 0.6rem;
+  color: var(--muted);
+  font-weight: normal;
+}
+
 /* ---- 遮罩 ---- */
 .overlay {
   position: fixed;
