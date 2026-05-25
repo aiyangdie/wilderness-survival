@@ -50,7 +50,7 @@ export class VfxManager {
     this.focusRing.frustumCulled = false;
     scene.add(this.focusRing);
 
-    this.slash = new THREE.Mesh(
+    this.slashMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(1.2, 0.15),
       new THREE.MeshBasicMaterial({
         color: 0xffffff,
@@ -60,9 +60,9 @@ export class VfxManager {
         depthWrite: false,
       })
     );
-    this.slash.visible = false;
-    this.slash.frustumCulled = false;
-    scene.add(this.slash);
+    this.slashMesh.visible = false;
+    this.slashMesh.frustumCulled = false;
+    scene.add(this.slashMesh);
     this.slashTimer = 0;
     this._pulseT = 0;
     this._focusVisible = false;
@@ -101,9 +101,9 @@ export class VfxManager {
   }
 
   slash(x, y, z, yaw) {
-    this.slash.position.set(x, y + 1.2, z);
-    this.slash.rotation.set(-Math.PI / 2, 0, yaw - 0.4);
-    this.slash.visible = true;
+    this.slashMesh.position.set(x, y + 1.2, z);
+    this.slashMesh.rotation.set(-Math.PI / 2, 0, yaw - 0.4);
+    this.slashMesh.visible = true;
     this.slashTimer = 0.1;
   }
 
@@ -127,8 +127,8 @@ export class VfxManager {
     }
     if (this.slashTimer > 0) {
       this.slashTimer -= dt;
-      this.slash.material.opacity = Math.max(0, this.slashTimer / 0.1) * 0.85;
-      if (this.slashTimer <= 0) this.slash.visible = false;
+      this.slashMesh.material.opacity = Math.max(0, this.slashTimer / 0.1) * 0.85;
+      if (this.slashTimer <= 0) this.slashMesh.visible = false;
     }
 
     for (const p of this.pool) {
@@ -151,6 +151,6 @@ export class VfxManager {
       p.mesh.visible = false;
     }
     this.focusRing.visible = false;
-    this.slash.visible = false;
+    this.slashMesh.visible = false;
   }
 }
