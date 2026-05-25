@@ -26,6 +26,28 @@ export const CFG = {
     catchCloseHpRatio: 0.72,
     coyoteTime: 0.12,
     buildReach: 6,
+    footOffset: 0.08,
+    groundSnapSpeed: 24,
+  },
+  survival: {
+    eat: {
+      cookedHunger: 48,
+      cookedHealth: 18,
+      cookedThirst: 8,
+      rawHunger: 24,
+      rawHealthPenalty: 5,
+      fiberHunger: 10,
+    },
+    shelter: {
+      healthPerSec: 4,
+      hungerPerSec: 1.5,
+      thirstPerSec: 1,
+      staminaPerSec: 5,
+      interactRange: 3.2,
+    },
+    campfire: { cookRange: 3.5, warmthHealth: 0.5 },
+    sprintHungerMul: 1.25,
+    sprintThirstMul: 1.2,
   },
   passive: {
     fleeDist: 11,
@@ -37,7 +59,7 @@ export const CFG = {
     staminaRegen: 35,
   },
   worldBounds: 0.47,
-  decay: { hunger: 0.18, thirst: 0.28 },
+  decay: { hunger: 0.14, thirst: 0.22, healthFromStarve: 3.5 },
   spawn: { tree: 34, rock: 16, bush: 18, deer: 5, rabbit: 5, wolf: 2 },
   camera: {
     dist: 6.5,
@@ -89,7 +111,7 @@ export const RECIPES = {
     icon: '🍖',
     costs: { meat: 1, wood: 1 },
     yield: { cooked_meat: 1 },
-    desc: '恢复饥饿与生命',
+    desc: '熟肉回饱食+生命 · 篝火旁仅需生肉',
   },
   rope: {
     name: '绳索',
@@ -178,10 +200,10 @@ export const RECIPES = {
 };
 
 export const BUILD_DEFS = {
-  campfire: { hp: 80, radius: 0.9, height: 0.4 },
+  campfire: { hp: 80, radius: 0.9, height: 0.4, cookRange: 3.5 },
   wall: { hp: 120, radius: 1.1, height: 2.2, collider: true },
-  floor: { hp: 60, radius: 1.4, height: 0.15 },
-  shelter: { hp: 200, radius: 2.2, height: 2.8, healAura: 2, collider: true },
+  floor: { hp: 60, radius: 1.4, height: 0.15, collider: true },
+  shelter: { hp: 200, radius: 2.2, height: 2.8, healAura: 1.5, collider: true, restRange: 3.2 },
 };
 
 export const ENTITY_LABELS = {

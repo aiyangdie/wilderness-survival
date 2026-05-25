@@ -57,11 +57,15 @@ export class BuildSystem {
     this.ghost = null;
     this.yaw = 0;
     this._tmp = new THREE.Vector3();
+    this.pendingRecipeId = null;
+    this._placedRecipe = false;
   }
 
-  enter(type) {
-    this.exit();
+  enter(type, recipeId = null) {
+    this.exit(false);
     this.mode = type;
+    this.pendingRecipeId = recipeId;
+    this._placedRecipe = false;
     this.ghost = makeMesh(type);
     this.ghost.traverse((c) => {
       if (c.isMesh && c.material) {
@@ -73,12 +77,15 @@ export class BuildSystem {
     this.scene.add(this.ghost);
   }
 
-  exit() {
+  exit(refund = true) {
     if (this.ghost) {
       this.scene.remove(this.ghost);
       this.ghost = null;
     }
+    const recipeId = this.pendingRecipeId;
     this.mode = null;
+    this.pendingRecipeId = null;
+    return { refund: refund && recipeId && !this._placedRecipe, recipeId };
   }
 
   rotate() {
@@ -95,16 +102,33 @@ export class BuildSystem {
     this.ghost.rotation.y = this.yaw + yaw;
   }
 
+  _canPlaceAt(x, z, radius) {
+    for (const c of this.world.colliders) {
+      const dx = x - c.x;
+      const dz = z - c.z;
+      if (dx * dx + dz * dz < (c.r + radius + 0.6) ** 2) return false;
+    }
+    for (const b of this.placed) {
+      const dx = x - b.x;
+      const dz = z - b.z;
+      const br = (b.def?.radius || 1) + radius + 0.4;
+      if (dx * dx + dz * dz < br * br) return false;
+    }
+    return true;
+  }
+
   tryPlace(inventory) {
     if (!this.ghost || !this.mode) return false;
     const { x, z } = this.ghost.position;
     const y = this.ghost.position.y;
+    const def = BUILD_DEFS[this.mode];
+    if (!this._canPlaceAt(x, z, def.radius || 1)) return false;
+
     const mesh = makeMesh(this.mode);
     mesh.position.set(x, y, z);
     mesh.rotation.copy(this.ghost.rotation);
     this.scene.add(mesh);
 
-    const def = BUILD_DEFS[this.mode];
     const entry = {
       type: this.mode,
       mesh,
@@ -116,6 +140,7 @@ export class BuildSystem {
       def,
     };
     this.placed.push(entry);
+    this._placedRecipe = true;
 
     if (def.collider) {
       this.world.colliders.push({ x, z, r: def.radius });
@@ -127,8 +152,30 @@ export class BuildSystem {
       entry.light = light;
     }
 
-    this.exit();
+    this.exit(false);
     return true;
+  }
+
+  getNearCampfire(px, pz, range) {
+    const r = range ?? BUILD_DEFS.campfire.cookRange ?? 3.5;
+    for (const b of this.placed) {
+      if (b.type !== 'campfire' || b.hp <= 0) continue;
+      const dx = b.x - px;
+      const dz = b.z - pz;
+      if (dx * dx + dz * dz <= (b.def.radius + r) ** 2) return b;
+    }
+    return null;
+  }
+
+  getNearShelter(px, pz, range) {
+    const r = range ?? BUILD_DEFS.shelter.restRange ?? 3.2;
+    for (const b of this.placed) {
+      if (b.type !== 'shelter' || b.hp <= 0) continue;
+      const dx = b.x - px;
+      const dz = b.z - pz;
+      if (dx * dx + dz * dz <= (b.def.radius + r) ** 2) return b;
+    }
+    return null;
   }
 
   getShelterHeal(px, pz) {

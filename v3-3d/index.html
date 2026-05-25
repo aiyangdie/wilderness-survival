@@ -36,6 +36,7 @@
         <div class="bar-track"><div id="bar-stamina" class="bar-fill stamina"></div></div>
         <span id="val-stamina" class="val">100</span>
       </div>
+      <p id="survival-hint" class="survival-hint">按 H 打开生存指南</p>
     </div>
 
     <div class="hud-right">
@@ -51,6 +52,7 @@
         <div id="compass-arrow">▲</div>
         <span class="compass-n">N</span>
       </div>
+      <button id="btn-guide" type="button" class="btn-guide" title="生存指南 (H)">📖 指南</button>
       <a class="back" href="../">← 返回</a>
       <span id="fps-counter" title="帧率">-- FPS</span>
     </div>
@@ -72,7 +74,13 @@
   <div id="overlay-start" class="overlay show">
     <div class="panel">
       <h1>荒野生存 3D</h1>
-      <p class="lead">第三人称荒野生存 · 采集、狩猎、抵御黑夜</p>
+      <p class="lead">真实生存循环：喝水 → 狩猎 → 烤肉 → 建棚屋 → 活过黑夜</p>
+      <ul class="start-tips">
+        <li>💧 口渴：找<strong>灌木</strong>按 <kbd>E</kbd> 喝水</li>
+        <li>🍖 饥饿：打猎得生肉 → <strong>篝火</strong>旁 <kbd>C</kbd> 烤肉 → <kbd>E</kbd> 吃熟肉</li>
+        <li>🏠 建造：<kbd>B</kbd> 制作 → 左键放置棚屋/木墙 · 棚屋旁 <kbd>E</kbd> 休息回血</li>
+        <li>📖 游戏中按 <kbd>H</kbd> 随时打开完整生存指南</li>
+      </ul>
       <div class="controls-grid">
         <div><kbd>W A S D</kbd><span>移动（相对视角）</span></div>
         <div><kbd>Shift</kbd><span>奔跑（需移动中）</span></div>
@@ -84,6 +92,7 @@
         <div><kbd>B</kbd><span>制作 / 建造 / 装备</span></div>
         <div><kbd>Esc</kbd><span>暂停菜单</span></div>
         <div><kbd>Tab</kbd><span>显示/隐藏背包栏</span></div>
+        <div><kbd>H</kbd><span>生存指南</span></div>
       </div>
       <button id="btn-start" type="button">开始生存</button>
     </div>
@@ -104,6 +113,15 @@
         <button id="btn-resume" type="button">继续游戏</button>
         <button id="btn-pause-restart" type="button" class="secondary">重新开始</button>
       </div>
+    </div>
+  </div>
+
+  <div id="overlay-guide" class="overlay">
+    <div class="panel panel-wide">
+      <h2>📖 荒野生存指南</h2>
+      <p class="lead">吃喝、恢复、建造 — 按顺序做会越活越好</p>
+      <div id="guide-body" class="guide-body"></div>
+      <button id="btn-guide-close" type="button">关闭 (H)</button>
     </div>
   </div>
 
@@ -133,6 +151,6 @@
     }
   }
   </script>
-  <script type="module" src="js/main.js?v=20250528c"></script>
+  <script type="module" src="js/main.js?v=20250529a"></script>
 </body>
 </html>

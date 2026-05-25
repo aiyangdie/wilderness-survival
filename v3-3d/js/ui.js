@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES, CFG } from './config.js';
+import { SURVIVAL_GUIDE } from './survival.js';
 
 const CATCH_HP_RATIO = CFG.player.catchHpRatio;
 const CATCH_CLOSE_DIST = CFG.player.catchCloseDist ?? 4.5;
@@ -42,6 +43,9 @@ export class GameUI {
       compass: document.getElementById('compass-arrow'),
       spawnShield: document.getElementById('spawn-shield'),
       fps: document.getElementById('fps-counter'),
+      survivalHint: document.getElementById('survival-hint'),
+      guide: document.getElementById('overlay-guide'),
+      guideBody: document.getElementById('guide-body'),
       start: document.getElementById('overlay-start'),
       dead: document.getElementById('overlay-dead'),
       pause: document.getElementById('overlay-pause'),
@@ -99,6 +103,26 @@ export class GameUI {
 
   showPause(show) {
     this.els.pause.classList.toggle('show', show);
+  }
+
+  showGuide(show) {
+    const el = this.els.guide;
+    if (!el) return;
+    el.classList.toggle('show', show);
+    if (show && this.els.guideBody && !this.els.guideBody.childElementCount) {
+      for (const sec of SURVIVAL_GUIDE) {
+        const block = document.createElement('section');
+        block.className = 'guide-block';
+        block.innerHTML = `<h3>${sec.title}</h3><ul>${sec.lines.map((l) => `<li>${l}</li>`).join('')}</ul>`;
+        this.els.guideBody.appendChild(block);
+      }
+    }
+  }
+
+  setSurvivalHint(text) {
+    const el = this.els.survivalHint;
+    if (!el || el.textContent === text) return;
+    el.textContent = text;
   }
 
   setFps(fps) {
@@ -401,10 +425,15 @@ export class GameUI {
     this.els.sensY.addEventListener('input', sync);
   }
 
-  getTargetPrompt(target, inventory) {
+  getTargetPrompt(target, inventory, ctx = {}) {
     if (!target) {
+      if (ctx.nearShelter) return { text: '[E] 在棚屋休息（回血回体）', mode: 'item', hpRatio: null };
+      if (ctx.nearCampfire && (inventory.meat || 0) > 0) {
+        return { text: '[C] 篝火烤肉（仅消耗生肉）', mode: 'item', hpRatio: null };
+      }
       if ((inventory.cooked_meat || 0) > 0) return { text: '[E] 食用熟肉', mode: 'item', hpRatio: null };
-      if ((inventory.meat || 0) > 0) return { text: '[E] 食用生肉', mode: 'item', hpRatio: null };
+      if ((inventory.meat || 0) > 0) return { text: '[E] 食用生肉 / [C] 烤肉', mode: 'item', hpRatio: null };
+      if ((inventory.fiber || 0) > 0) return { text: '[E] 嚼纤维充饥', mode: 'neutral', hpRatio: null };
       return null;
     }
     if (target.kind === 'catch') {

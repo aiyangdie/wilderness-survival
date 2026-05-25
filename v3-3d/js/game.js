@@ -6,6 +6,15 @@ import { GameInput } from './input.js';
 import { GameUI } from './ui.js';
 import { VfxManager } from './effects.js';
 import { AtmosphereFX, attachGroundShadow } from './atmosphere.js';
+import {
+  applyDrink,
+  applyEat,
+  applyShelterRest,
+  canCookMeat,
+  cookMeatCosts,
+  getStatusHint,
+  refundRecipe,
+} from './survival.js';
 import { CraftSystem } from './craft.js';
 import { BuildSystem } from './buildings.js';
 import { EquipmentManager } from './equipment.js';
@@ -73,6 +82,9 @@ export class Game3D {
     this._camGroundFrame = 0;
     this._shelterCache = { x: 0, z: 0, val: 0 };
     this._deadPending = 0;
+    this._resting = false;
+    this._guideOpen = false;
+    this._statusHintCd = 0;
 
     this._initRenderer();
     this.ui = new GameUI();
@@ -92,6 +104,11 @@ export class Game3D {
     document.getElementById('btn-restart').onclick = () => this._begin(false);
     document.getElementById('btn-craft-close')?.addEventListener('click', () => {
       if (this.craftOpen) this._toggleCraft();
+    });
+    document.getElementById('btn-guide-close')?.addEventListener('click', () => this._toggleGuide(false));
+    document.getElementById('btn-guide')?.addEventListener('click', () => this._toggleGuide());
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyH' && this.running && !this.paused) this._toggleGuide();
     });
     window.addEventListener('resize', () => this._resize());
     this._resize();
@@ -245,12 +262,10 @@ export class Game3D {
     this.input.setEnabled(true);
     this.input.setPaused(false);
     setTimeout(() => this.canvas.requestPointerLock(), 100);
-    this.ui.toast(
-      this.human.useGltf
-        ? 'Shift 冲刺追猎 · 打伤后 E 捕获 · 动物不会跑出边界'
-        : 'B 制作 · Shift 追猎 · E 捕获',
-      'info'
-    );
+    this.ui.toast('按 H 打开生存指南 · B 制作建造 · 灌木 E 喝水', 'info');
+    setTimeout(() => {
+      this.ui.toast('狩猎→篝火烤肉→建棚屋休息 · 夜晚用木墙挡怪', 'info');
+    }, 3200);
     this._loop();
   }
 
@@ -312,7 +327,7 @@ export class Game3D {
     if (this.buildSys?.mode) {
       if (this.input.justPressed('KeyR')) this.buildSys.rotate();
       if (this.input.clickAttack) this._tryPlaceBuild();
-      if (this.input.justPressed('Escape')) this.buildSys.exit();
+      if (this.input.justPressed('Escape')) this._cancelBuild();
     } else if (!this.craftOpen) {
       if (this.input.justPressed('KeyC')) this._craftQuick('cooked_meat');
       if (this.input.clickAttack) this._attack();
@@ -334,14 +349,29 @@ export class Game3D {
     this.atmosphere?.setPhase(this.phase === 'night');
     this.atmosphere?.update(dt, p.x, p.z);
 
+    const nearShelter = this.buildSys?.getNearShelter(p.x, p.z);
+    const nearCampfire = this.buildSys?.getNearCampfire(p.x, p.z);
+    if (this._resting && nearShelter) {
+      applyShelterRest(p, dt);
+    } else {
+      this._resting = false;
+    }
+
     const shelterHeal = this._getShelterHeal(p.x, p.z);
     if (shelterHeal > 0) {
       p.health = Math.min(100, p.health + shelterHeal * dt);
     }
+    if (nearCampfire) {
+      p.health = Math.min(100, p.health + (CFG.survival?.campfire?.warmthHealth ?? 0.5) * dt);
+    }
 
-    p.hunger = Math.max(0, p.hunger - CFG.decay.hunger * dt);
-    p.thirst = Math.max(0, p.thirst - CFG.decay.thirst * dt);
-    if (p.hunger <= 0 || p.thirst <= 0) p.health = Math.max(0, p.health - 4 * dt);
+    const sprintingMove = this.input.wantsSprint() && p.stamina > 8;
+    const hungerMul = sprintingMove ? (CFG.survival?.sprintHungerMul ?? 1.2) : 1;
+    const thirstMul = sprintingMove ? (CFG.survival?.sprintThirstMul ?? 1.15) : 1;
+    p.hunger = Math.max(0, p.hunger - CFG.decay.hunger * hungerMul * dt);
+    p.thirst = Math.max(0, p.thirst - CFG.decay.thirst * thirstMul * dt);
+    const starve = CFG.decay.healthFromStarve ?? 3.5;
+    if (p.hunger <= 0 || p.thirst <= 0) p.health = Math.max(0, p.health - starve * dt);
 
     if (p.health < this.prevHealth - 0.5) {
       this.ui.flashDamage();
@@ -467,18 +497,8 @@ export class Game3D {
       }
     }
 
-    const groundMoved =
-      p.groundY == null ||
-      Number.isNaN(p.groundY) ||
-      Math.abs(p.x - this._lastGroundX) > 0.12 ||
-      Math.abs(p.z - this._lastGroundZ) > 0.12 ||
-      !p.onGround;
-    if (groundMoved) {
-      p.groundY = this.world.getHeightAt(p.x, p.z);
-      this._lastGroundX = p.x;
-      this._lastGroundZ = p.z;
-    }
-    const groundY = p.groundY ?? this.world.getHeightAt(p.x, p.z);
+    const foot = CFG.player.footOffset ?? 0.08;
+    const targetGround = this.world.getHeightAt(p.x, p.z) + foot;
 
     if (this.input.justPressed('Space') && (p.onGround || this.coyoteTimer > 0)) {
       p.vy = CFG.player.jumpForce;
@@ -489,13 +509,21 @@ export class Game3D {
     if (!p.onGround) {
       p.vy -= CFG.player.gravity * dt;
       p.y += p.vy * dt;
-      if (p.y <= groundY) {
-        p.y = groundY;
+      if (p.y <= targetGround) {
+        p.y = targetGround;
         p.vy = 0;
         p.onGround = true;
       }
     } else {
-      p.y = groundY;
+      const snap = CFG.player.groundSnapSpeed ?? 24;
+      const bury = p.y < targetGround - 0.08;
+      if (bury) p.y = targetGround;
+      else p.y += (targetGround - p.y) * Math.min(1, dt * snap);
+      p.groundY = targetGround;
+      p.vy = 0;
+      p.onGround = true;
+      this._lastGroundX = p.x;
+      this._lastGroundZ = p.z;
     }
 
     if (p.onGround && !this.wasOnGround) {
@@ -594,7 +622,7 @@ export class Game3D {
       if (distSq > cullDistSq) continue;
 
       if (moved || distSq < 196) {
-        e.y = this.world.getHeightAt(e.x, e.z);
+        e.y = this.world.getHeightAt(e.x, e.z) + 0.02;
         e._lastX = e.x;
         e._lastZ = e.z;
         e._heightCd = 0;
@@ -703,10 +731,40 @@ export class Game3D {
     }
   }
 
+  _cancelBuild() {
+    if (!this.buildSys?.mode) return;
+    const { refund, recipeId } = this.buildSys.exit(true);
+    if (refund && recipeId) {
+      refundRecipe(recipeId, this.inventory);
+      this.ui.markInventoryDirty();
+      this.ui.toast('已取消建造，材料已退还', 'info');
+    } else {
+      this.ui.toast('已取消建造', 'info');
+    }
+  }
+
+  _toggleGuide(force) {
+    this._guideOpen = force !== undefined ? force : !this._guideOpen;
+    this.ui.showGuide(this._guideOpen);
+    if (this._guideOpen) document.exitPointerLock();
+    else if (this.running && !this.paused && !this.craftOpen) this.canvas.requestPointerLock();
+  }
+
   _interact() {
     if (this.interactCooldown > 0) return;
     const p = this.player;
     const stats = this._getCombatStats();
+    const nearShelter = this.buildSys?.getNearShelter(p.x, p.z);
+    const nearCampfire = this.buildSys?.getNearCampfire(p.x, p.z);
+
+    if (nearShelter && !this.world.getInteractable(p.x, p.z, 2.5)) {
+      this._resting = true;
+      this._interactPulse = true;
+      this.interactCooldown = 0.8;
+      applyShelterRest(p, 0.35);
+      this.ui.toast('在棚屋休息 — 生命/饱食/口渴缓慢恢复', 'success');
+      return;
+    }
 
     const catchT = this.world.getCatchable(
       p.x, p.z, CFG.player.catchRange, CFG.player.catchHpRatio
@@ -723,11 +781,11 @@ export class Game3D {
     }
 
     const bush = this.world.getNearestBush(p.x, p.z, 2.8);
-    if (bush && p.thirst < 88) {
+    if (bush && p.thirst < 95) {
       this.interactCooldown = 0.6;
       this._interactPulse = true;
-      p.thirst = Math.min(100, p.thirst + (bush.def?.drink || 15));
-      this.ui.toast('从灌木丛取水饮用', 'success');
+      applyDrink(p, bush.def?.drink || 22);
+      this.ui.toast('从灌木丛取水 — 口渴恢复', 'success');
       return;
     }
 
@@ -752,9 +810,8 @@ export class Game3D {
       this._interactPulse = true;
       this.inventory.cooked_meat--;
       this.ui.markInventoryDirty();
-      p.hunger = Math.min(100, p.hunger + 42);
-      p.health = Math.min(100, p.health + 12);
-      this.ui.toast('食用熟肉', 'success');
+      const eat = applyEat('cooked_meat', p);
+      this.ui.toast(eat.msg, 'success');
       return;
     }
 
@@ -763,16 +820,47 @@ export class Game3D {
       this._interactPulse = true;
       this.inventory.meat--;
       this.ui.markInventoryDirty();
-      p.hunger = Math.min(100, p.hunger + 22);
-      p.health = Math.max(0, p.health - 4);
-      this.ui.toast('食用生肉（建议按 C 烤肉）', 'warn');
+      const eat = applyEat('meat', p);
+      this.ui.toast(eat.msg, nearCampfire ? 'warn' : 'warn');
       return;
     }
 
-    this.ui.toast('附近没有可交互目标', 'warn');
+    if ((this.inventory.fiber || 0) > 0 && p.hunger < 70) {
+      this.interactCooldown = 0.4;
+      this._interactPulse = true;
+      this.inventory.fiber--;
+      this.ui.markInventoryDirty();
+      const eat = applyEat('fiber', p);
+      this.ui.toast(eat.msg, 'info');
+      return;
+    }
+
+    if (nearCampfire) this.ui.toast('篝火旁：有生肉按 C 烤肉', 'info');
+    else if (nearShelter) this.ui.toast('棚屋旁：按 E 休息恢复', 'info');
+    else this.ui.toast('附近没有可交互目标 — 按 H 查看生存指南', 'warn');
   }
 
   _craftQuick(recipeId) {
+    if (recipeId === 'cooked_meat') {
+      const near = this.buildSys?.getNearCampfire(this.player.x, this.player.z);
+      if (!canCookMeat(this.inventory, !!near)) {
+        this.ui.toast(
+          near ? '需要生肉才能烤肉' : '需要生肉+木材，或到篝火旁仅消耗生肉',
+          'warn'
+        );
+        return;
+      }
+      const costs = cookMeatCosts(!!near);
+      for (const [k, v] of Object.entries(costs)) {
+        this.inventory[k] -= v;
+        if (this.inventory[k] <= 0) delete this.inventory[k];
+      }
+      this.inventory.cooked_meat = (this.inventory.cooked_meat || 0) + 1;
+      this.ui.markInventoryDirty();
+      this.ui.toast(near ? '篝火烤肉完成' : '野外烤肉完成（消耗木材）', 'success');
+      this.player.score += 6;
+      return;
+    }
     const res = this.craft.craft(recipeId, this.inventory, this.equipment);
     if (!res.ok) {
       this.ui.toast(res.reason || '材料不足', 'warn');
@@ -808,8 +896,8 @@ export class Game3D {
     if (res.build) {
       this.craftOpen = false;
       this.ui.showCraft(false);
-      this.buildSys.enter(res.build);
-      this.ui.toast(`放置模式：${RECIPES[recipeId].name} · 左键放置 R旋转 Esc取消`, 'info');
+      this.buildSys.enter(res.build, recipeId);
+      this.ui.toast(`放置：${RECIPES[recipeId].name} · 左键确认 R旋转 Esc取消退还材料`, 'info');
       return;
     }
     this.ui.toast(`${res.recipe.name} 制作完成`, 'success');
@@ -818,9 +906,20 @@ export class Game3D {
 
   _tryPlaceBuild() {
     if (!this.buildSys?.mode) return;
+    const buildType = this.buildSys.mode;
     if (this.buildSys.tryPlace(this.inventory)) {
-      this.ui.toast('建造完成', 'success');
+      const t = buildType;
+      this.ui.markInventoryDirty();
+      const tips = {
+        campfire: '篝火：靠近按 C 烤肉（只需生肉）',
+        shelter: '棚屋：站在旁边按 E 休息回血',
+        wall: '木墙：可阻挡夜间怪物',
+        floor: '木地板：平整落脚区',
+      };
+      this.ui.toast(`建造完成 — ${tips[t] || ''}`, 'success');
       this.player.score += 15;
+    } else {
+      this.ui.toast('无法放置：与其他物体重叠', 'warn');
     }
   }
 
@@ -883,7 +982,24 @@ export class Game3D {
       p.x, p.z, CFG.player.interactRange, CFG.player.attackRange, this.phase === 'night'
     );
     const focus = this.focusTarget;
-    const prompt = this.ui.getTargetPrompt(focus, this.inventory);
+    const prompt = this.ui.getTargetPrompt(focus, this.inventory, {
+      nearCampfire: !!nearCampfire,
+      nearShelter: !!nearShelter,
+    });
+    const nearCampfire = this.buildSys?.getNearCampfire(p.x, p.z);
+    const nearShelter = this.buildSys?.getNearShelter(p.x, p.z);
+    this._statusHintCd -= CFG.ui.barsInterval;
+    if (this._statusHintCd <= 0) {
+      this._statusHintCd = 2.5;
+      this.ui.setSurvivalHint(
+        getStatusHint(p, this.inventory, {
+          nearCampfire: !!nearCampfire,
+          nearShelter: !!nearShelter,
+          hasCampfire: this.buildSys?.placed?.some((b) => b.type === 'campfire'),
+        })
+      );
+    }
+
     if (prompt && this.input.mouseLocked) {
       this.ui.setInteractPrompt(prompt.text, prompt.mode, prompt.hpRatio);
       this.ui.setCrosshairMode(prompt.mode === 'danger' ? 'danger' : prompt.mode, this.isAttacking);
