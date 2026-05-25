@@ -175,9 +175,50 @@ export class World3D {
       const def = RESOURCES[type] || CREATURES[type];
       if (this._collides(x, z, def.radius || 1)) continue;
       this.entities.push(this._createEntity(type, x, z, def));
-      if (RESOURCES[type]) this.colliders.push({ x, z, r: def.radius || 1 });
+      if (RESOURCES[type]) {
+        this.colliders.push(this._makeCollider(type, x, z, this.getHeightAt(x, z), def));
+      }
       return;
     }
+  }
+
+  _makeCollider(type, x, z, groundY, def) {
+    const r = def.radius || 1;
+    let surfaceY = groundY;
+    if (type === 'rock') surfaceY = groundY + 1.12;
+    else if (type === 'tree') surfaceY = groundY + 0.25;
+    else if (type === 'bush') surfaceY = groundY + 0.52;
+    return { x, z, r, groundY, surfaceY, type };
+  }
+
+  /** 脚底支撑高度：地形 + 石头/树/建筑顶面取最高 */
+  getFootY(x, z, probeR = 0.42) {
+    const offsets = [
+      [0, 0],
+      [probeR, 0],
+      [-probeR, 0],
+      [0, probeR],
+      [0, -probeR],
+      [probeR * 0.65, probeR * 0.65],
+      [-probeR * 0.65, -probeR * 0.65],
+    ];
+    let maxH = -Infinity;
+    for (const [ox, oz] of offsets) {
+      const px = x + ox;
+      const pz = z + oz;
+      let h = this.getHeightAt(px, pz);
+      for (const c of this.colliders) {
+        const dx = px - c.x;
+        const dz = pz - c.z;
+        const reach = c.r + probeR + 0.2;
+        if (dx * dx + dz * dz <= reach * reach) {
+          const top = c.surfaceY ?? c.groundY ?? this.getHeightAt(c.x, c.z);
+          h = Math.max(h, top);
+        }
+      }
+      maxH = Math.max(maxH, h);
+    }
+    return maxH;
   }
 
   _collides(x, z, r) {

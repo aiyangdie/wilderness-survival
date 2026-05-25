@@ -228,7 +228,7 @@ export class Game3D {
       this._playerShadow = attachGroundShadow(this.human.group, 0.75, 0.35);
     }
 
-    const spawnY = this.world.getHeightAt(0, 0);
+    const spawnY = this.world.getFootY(0, 0);
     this.player = this._newPlayer();
     this.player.y = spawnY;
     this.player.groundY = spawnY;
@@ -335,7 +335,7 @@ export class Game3D {
     }
 
     if (this.buildSys?.mode) {
-      this.buildSys.update(p.x, p.y, p.z, this.yaw, (x, z) => this.world.getHeightAt(x, z));
+      this.buildSys.update(p.x, p.y, p.z, this.yaw, (x, z) => this.world.getFootY(x, z));
     }
 
     this._updateTime(dt);
@@ -497,8 +497,7 @@ export class Game3D {
       }
     }
 
-    const foot = CFG.player.footOffset ?? 0.08;
-    const targetGround = this.world.getHeightAt(p.x, p.z) + foot;
+    const targetGround = this.world.getFootY(p.x, p.z, 0.48);
 
     if (this.input.justPressed('Space') && (p.onGround || this.coyoteTimer > 0)) {
       p.vy = CFG.player.jumpForce;
@@ -516,9 +515,9 @@ export class Game3D {
       }
     } else {
       const snap = CFG.player.groundSnapSpeed ?? 24;
-      const bury = p.y < targetGround - 0.08;
-      if (bury) p.y = targetGround;
-      else p.y += (targetGround - p.y) * Math.min(1, dt * snap);
+      const err = targetGround - p.y;
+      if (err > 0.12 || err < -0.25) p.y = targetGround;
+      else p.y += err * Math.min(1, dt * snap);
       p.groundY = targetGround;
       p.vy = 0;
       p.onGround = true;
@@ -622,12 +621,12 @@ export class Game3D {
       if (distSq > cullDistSq) continue;
 
       if (moved || distSq < 196) {
-        e.y = this.world.getHeightAt(e.x, e.z) + 0.02;
+        e.y = this.world.getFootY(e.x, e.z, (e.radius || 0.5) * 0.5);
         e._lastX = e.x;
         e._lastZ = e.z;
         e._heightCd = 0;
       } else if ((e._heightCd ?? 0) <= 0 && distSq < 784) {
-        e.y = this.world.getHeightAt(e.x, e.z);
+        e.y = this.world.getFootY(e.x, e.z, (e.radius || 0.5) * 0.5);
         e._heightCd = 0.35;
       } else if (e._heightCd > 0) {
         e._heightCd -= dt;
@@ -1100,7 +1099,7 @@ export class Game3D {
   _render() {
     const p = this.player;
     if (!Number.isFinite(p.y) && this.world) {
-      const gy = this.world.getHeightAt(p.x, p.z);
+      const gy = this.world.getFootY(p.x, p.z);
       p.y = gy;
       p.groundY = gy;
     }
@@ -1108,20 +1107,22 @@ export class Game3D {
     const dist = cam.dist;
     const height = cam.height + this.pitch * 1.5;
 
+    const lift = this.human?.getFootLift?.() ?? 0;
+    const bodyY = p.y + lift;
     this._camDesired.set(
       p.x - Math.sin(this.yaw) * dist,
-      p.y + height,
+      bodyY + height,
       p.z - Math.cos(this.yaw) * dist
     );
 
     if (this.world) {
       this._camGroundFrame += 1;
       if (this._camGroundFrame % 2 === 0) {
-        this._camGroundY = this.world.getHeightAt(this._camDesired.x, this._camDesired.z);
+        this._camGroundY = this.world.getFootY(this._camDesired.x, this._camDesired.z, 0.3);
       }
       this._camDesired.y = Math.max(this._camDesired.y, this._camGroundY + 1.2);
     } else if (this.player.groundY != null) {
-      this._camDesired.y = Math.max(this._camDesired.y, this.player.groundY + 1.2);
+      this._camDesired.y = Math.max(this._camDesired.y, this.player.groundY + lift + 1.2);
     }
 
     const smooth = this.paused ? 0.08 : cam.smooth;
@@ -1138,7 +1139,7 @@ export class Game3D {
     }
 
     const eyeH = this.human?.getEyeHeight?.() ?? CFG.player.height * 0.85;
-    this._camTarget.set(p.x, p.y + eyeH, p.z);
+    this._camTarget.set(p.x, bodyY + eyeH, p.z);
     this.camera.position.copy(this._camPos);
     this.camera.lookAt(this._camTarget);
 

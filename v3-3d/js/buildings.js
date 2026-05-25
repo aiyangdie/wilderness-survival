@@ -143,7 +143,18 @@ export class BuildSystem {
     this._placedRecipe = true;
 
     if (def.collider) {
-      this.world.colliders.push({ x, z, r: def.radius });
+      let surfaceY = y;
+      if (this.mode === 'wall') surfaceY = y + 0.15;
+      else if (this.mode === 'floor') surfaceY = y + 0.14;
+      else if (this.mode === 'shelter') surfaceY = y + 0.2;
+      this.world.colliders.push({
+        x,
+        z,
+        r: def.radius,
+        groundY: y,
+        surfaceY,
+        type: this.mode,
+      });
     }
     if (this.mode === 'campfire') {
       const light = new THREE.PointLight(0xff8844, 1.2, 12);

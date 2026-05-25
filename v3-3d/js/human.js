@@ -198,6 +198,15 @@ export class HumanCharacter {
     this._lastTimeScale = 1;
     this._overlay = {};
     this._modelBaseY = 0;
+    this._footLift = 0;
+  }
+
+  _calibrateFootLift() {
+    this.group.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(this.group);
+    if (Number.isFinite(box.min.y)) {
+      this._footLift = -box.min.y + 0.03;
+    }
   }
 
   async load() {
@@ -228,6 +237,7 @@ export class HumanCharacter {
       this.procedural = new ProceduralHuman();
       this.group.add(this.procedural.group);
     }
+    this._calibrateFootLift();
     this.loaded = true;
   }
 
@@ -521,7 +531,11 @@ export class HumanCharacter {
   }
 
   setPosition(x, y, z) {
-    this.group.position.set(x, y, z);
+    this.group.position.set(x, y + (this._footLift || 0), z);
+  }
+
+  getFootLift() {
+    return this._footLift || 0;
   }
 
   setRotationY(yaw) {
