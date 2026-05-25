@@ -64,8 +64,8 @@ export class Game3D {
     this.phase = 'day';
     this.nightSpawned = false;
 
-    document.getElementById('btn-start').onclick = () => this.start();
-    document.getElementById('btn-restart').onclick = () => this.start();
+    document.getElementById('btn-start').onclick = () => this._begin(true);
+    document.getElementById('btn-restart').onclick = () => this._begin(false);
     window.addEventListener('resize', () => this._resize());
     this._resize();
   }
@@ -110,7 +110,26 @@ export class Game3D {
     if (!next && !this.input.mouseLocked) this.canvas.requestPointerLock();
   }
 
-  start() {
+  async _begin(fromMenu) {
+    const btn = fromMenu
+      ? document.getElementById('btn-start')
+      : document.getElementById('btn-restart');
+    const label = btn?.textContent;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '加载角色中…';
+    }
+    try {
+      await this.start();
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = label || '开始生存';
+      }
+    }
+  }
+
+  async start() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.paused = false;
     this.ui.showPause(false);
@@ -124,6 +143,8 @@ export class Game3D {
     this.world.generate();
     this.vfx = new VfxManager(this.scene);
     this.human = new HumanCharacter();
+    this.ui.toast('正在加载拟真角色模型…', 'info');
+    await this.human.load();
     this.scene.add(this.human.group);
 
     const spawnY = this.world.getHeightAt(0, 0);
@@ -152,7 +173,10 @@ export class Game3D {
     this.input.setEnabled(true);
     this.input.setPaused(false);
     setTimeout(() => this.canvas.requestPointerLock(), 100);
-    this.ui.toast('🛡️ 开局保护 4 秒 · C 键烤肉', 'info');
+    this.ui.toast(
+      this.human.useGltf ? '拟真角色已就绪 · 🛡️ 开局保护 4 秒' : '使用备用角色 · C 键烤肉',
+      'info'
+    );
     this._loop();
   }
 
@@ -616,7 +640,8 @@ export class Game3D {
       this._camPos.add(this._shakeOff);
     }
 
-    this._camTarget.set(p.x, p.y + CFG.player.height * 0.85, p.z);
+    const eyeH = this.human?.getEyeHeight?.() ?? CFG.player.height * 0.85;
+    this._camTarget.set(p.x, p.y + eyeH, p.z);
     this.camera.position.copy(this._camPos);
     this.camera.lookAt(this._camTarget);
 

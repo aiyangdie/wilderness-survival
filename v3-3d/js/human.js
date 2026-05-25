@@ -1,93 +1,173 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-/** 程序化拟真人体 + 呼吸/落地细节 */
+/** Three.js 官方 Soldier 模型（带 Idle / Walk / Run 骨骼动画） */
+const MODEL_URL = 'https://threejs.org/examples/models/gltf/Soldier.glb';
+
+/** 程序化备用人体（加载失败时使用） */
+class ProceduralHuman {
+  constructor() {
+    this.group = new THREE.Group();
+    this.parts = {};
+    this.walkPhase = 0;
+
+    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b4a0 });
+    const shirt = new THREE.MeshLambertMaterial({ color: 0x4a5568 });
+    const pants = new THREE.MeshLambertMaterial({ color: 0x2d3748 });
+
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.55, 4, 8), shirt);
+    torso.position.y = 1.1;
+    this.group.add(torso);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 12), skin);
+    head.position.y = 1.55;
+    this.group.add(head);
+
+    this.parts.leftLeg = this._limb(pants, -0.12, 0.5);
+    this.parts.rightLeg = this._limb(pants, 0.12, 0.5);
+    this.parts.leftArm = this._limb(skin, -0.34, 1.15, 0.08, 0.38);
+    this.parts.rightArm = this._limb(skin, 0.34, 1.15, 0.08, 0.38);
+  }
+
+  _limb(mat, x, py, w = 0.11, h = 0.48) {
+    const p = new THREE.Group();
+    p.position.set(x, py, 0);
+    const m = new THREE.Mesh(new THREE.CapsuleGeometry(w, h, 3, 6), mat);
+    m.position.y = -h / 2;
+    p.add(m);
+    this.group.add(p);
+    return p;
+  }
+
+  update(dt, speed, onGround, isAttacking) {
+    const moving = speed > 0.5 && onGround;
+    if (moving) {
+      this.walkPhase += dt * (speed > 9 ? 12 : 8);
+      const s = Math.sin(this.walkPhase) * 0.5;
+      this.parts.leftLeg.rotation.x = s;
+      this.parts.rightLeg.rotation.x = -s;
+      this.parts.leftArm.rotation.x = -s * 0.5;
+      this.parts.rightArm.rotation.x = s * 0.5;
+    }
+    if (isAttacking) this.parts.rightArm.rotation.x = -1.2;
+  }
+}
+
+/**
+ * 拟真角色：GLTF 骨骼人物 + 动画状态机
+ */
 export class HumanCharacter {
   constructor() {
     this.group = new THREE.Group();
-    this.meshParts = {};
-    this.walkPhase = 0;
-    this.idlePhase = Math.random() * Math.PI * 2;
+    this.model = null;
+    this.mixer = null;
+    this.actions = {};
+    this.activeAction = null;
+    this.state = '';
+    this.procedural = null;
+    this.loaded = false;
+    this.useGltf = false;
+    this.attackTimer = 0;
     this.landSquash = 0;
-
-    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b4a0 });
-    const shirt = new THREE.MeshLambertMaterial({ color: 0x3d5a80 });
-    const pants = new THREE.MeshLambertMaterial({ color: 0x2b2d42 });
-    const hair = new THREE.MeshLambertMaterial({ color: 0x3d2314 });
-
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.28), shirt);
-    torso.position.y = 1.15;
-    this.group.add(torso);
-    this.meshParts.torso = torso;
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), skin);
-    head.position.y = 1.65;
-    this.group.add(head);
-    this.meshParts.head = head;
-
-    const hairMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.23, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
-      hair
-    );
-    hairMesh.position.y = 1.72;
-    this.group.add(hairMesh);
-
-    this.meshParts.leftLeg = this._limb(0.14, 0.55, pants, -0.14, 0.55);
-    this.meshParts.rightLeg = this._limb(0.14, 0.55, pants, 0.14, 0.55);
-    this.meshParts.leftArm = this._limb(0.1, 0.45, skin, -0.38, 1.25);
-    this.meshParts.rightArm = this._limb(0.1, 0.45, skin, 0.38, 1.25);
-
-    this.baseTorsoY = 1.15;
-    this.baseHeadY = 1.65;
   }
 
-  _limb(w, h, mat, x, pivotY) {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, pivotY, 0);
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, w * 0.8), mat);
-    mesh.position.y = -h / 2;
-    pivot.add(mesh);
-    this.group.add(pivot);
-    return pivot;
+  async load() {
+    try {
+      const gltf = await new GLTFLoader().loadAsync(MODEL_URL);
+      this.model = gltf.scene;
+
+      this.model.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.frustumCulled = true;
+          if (obj.material) {
+            obj.material.skinning = true;
+          }
+        }
+      });
+
+      // 模型朝向与比例（约 1.75m 高）
+      this.model.rotation.y = Math.PI;
+      this.model.scale.setScalar(1.05);
+      this.model.position.y = 0;
+
+      this.group.add(this.model);
+      this.mixer = new THREE.AnimationMixer(this.model);
+
+      for (const clip of gltf.animations) {
+        const action = this.mixer.clipAction(clip);
+        action.setEffectiveTimeScale(1);
+        action.setEffectiveWeight(1);
+        this.actions[clip.name] = action;
+      }
+
+      this.useGltf = true;
+      this._fadeTo('Idle', 0.01);
+    } catch (err) {
+      console.warn('[HumanCharacter] GLTF 加载失败，使用备用模型', err);
+      this.procedural = new ProceduralHuman();
+      this.group.add(this.procedural.group);
+    }
+    this.loaded = true;
+  }
+
+  _fadeTo(name, duration = 0.2) {
+    if (!this.useGltf) return;
+    const next = this.actions[name];
+    if (!next || this.state === name) return;
+
+    const prev = this.activeAction;
+    if (prev && prev !== next) prev.fadeOut(duration);
+
+    next.reset().fadeIn(duration).play();
+    this.activeAction = next;
+    this.state = name;
   }
 
   triggerLand() {
-    this.landSquash = 0.18;
+    this.landSquash = 0.15;
   }
 
-  update(dt, speed, onGround, isAttacking, justLanded = false) {
-    if (justLanded) this.triggerLand();
-    if (this.landSquash > 0) this.landSquash = Math.max(0, this.landSquash - dt * 2.2);
+  update(dt, speed, onGround, isAttacking) {
+    if (!this.loaded) return;
 
-    const moving = speed > 0.5;
-    if (moving && onGround) {
-      this.walkPhase += dt * (speed > 9 ? 14 : 9);
-      const swing = Math.sin(this.walkPhase) * (speed > 9 ? 0.65 : 0.45);
-      this.meshParts.leftLeg.rotation.x = swing;
-      this.meshParts.rightLeg.rotation.x = -swing;
-      this.meshParts.leftArm.rotation.x = -swing * 0.55;
-      this.meshParts.rightArm.rotation.x = swing * 0.55;
-    } else if (onGround) {
-      this.idlePhase += dt * 1.8;
-      const breath = Math.sin(this.idlePhase) * 0.03;
-      this.meshParts.leftLeg.rotation.x *= 0.9;
-      this.meshParts.rightLeg.rotation.x *= 0.9;
-      this.meshParts.leftArm.rotation.x = breath * 2;
-      this.meshParts.rightArm.rotation.x = -breath * 2;
+    if (this.procedural) {
+      this.procedural.update(dt, speed, onGround, isAttacking);
+      return;
     }
 
-    if (isAttacking) {
-      this.meshParts.rightArm.rotation.x = -1.25;
-      this.meshParts.torso.rotation.y = 0.22;
+    if (this.mixer) this.mixer.update(dt);
+
+    if (isAttacking) this.attackTimer = 0.38;
+    if (this.attackTimer > 0) {
+      this.attackTimer -= dt;
+      this._fadeTo('Run', 0.08);
+      if (this.activeAction) {
+        this.activeAction.timeScale = 2.4;
+      }
+      return;
+    }
+
+    if (!onGround) {
+      this._fadeTo('Run', 0.12);
+      if (this.activeAction) this.activeAction.timeScale = 1.15;
+    } else if (speed > 9.5) {
+      this._fadeTo('Run', 0.18);
+      if (this.activeAction) this.activeAction.timeScale = 1.05 + speed / 14;
+    } else if (speed > 0.6) {
+      this._fadeTo('Walk', 0.18);
+      if (this.activeAction) this.activeAction.timeScale = 0.85 + speed / 11;
     } else {
-      this.meshParts.torso.rotation.y *= 0.88;
-      if (Math.abs(this.meshParts.torso.rotation.y) < 0.02) this.meshParts.torso.rotation.y = 0;
+      this._fadeTo('Idle', 0.22);
+      if (this.activeAction) this.activeAction.timeScale = 1;
     }
 
-    const bob = moving ? Math.abs(Math.sin(this.walkPhase * 2)) * 0.05 : 0;
-    const squash = this.landSquash * 0.12;
-    this.meshParts.torso.position.y = this.baseTorsoY + bob - squash;
-    this.meshParts.head.position.y = this.baseHeadY + bob * 0.5 - squash;
-    this.meshParts.torso.scale.y = 1 - squash * 0.5;
+    if (this.landSquash > 0) {
+      this.landSquash = Math.max(0, this.landSquash - dt * 2.5);
+      const squash = 1 - this.landSquash * 0.08;
+      this.model.scale.y = 1.05 * squash;
+    } else if (this.model) {
+      this.model.scale.y = 1.05;
+    }
   }
 
   setPosition(x, y, z) {
@@ -96,5 +176,10 @@ export class HumanCharacter {
 
   setRotationY(yaw) {
     this.group.rotation.y = yaw;
+  }
+
+  /** 供相机瞄准的高度 */
+  getEyeHeight() {
+    return this.useGltf ? 1.55 : 1.5;
   }
 }
