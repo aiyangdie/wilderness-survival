@@ -162,7 +162,7 @@ export class HumanCharacter {
       return;
     }
     this.tickState(speed, onGround, isAttacking);
-    if (this.mixer) this.mixer.update(dt);
+    this.tickAnim(dt);
   }
 
   setPosition(x, y, z) {
