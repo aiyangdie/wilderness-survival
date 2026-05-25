@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES, CFG } from './config.js';
+import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES, CFG } from './config.js?v=20250527d';
+
+const CATCH_HP_RATIO = CFG.player.catchHpRatio;
+const CATCH_CLOSE_DIST = CFG.player.catchCloseDist ?? 4.5;
 
 const FLOAT_POOL = 10;
 const LABEL_MAX = 4;
@@ -426,10 +429,10 @@ export class GameUI {
     }
     if (target.kind === 'passive') {
       const ratio = target.hp / target.maxHp;
-      if (ratio <= CFG.player.catchHpRatio) {
+      if (ratio <= CATCH_HP_RATIO) {
         return { text: `[E] 捕获（已削弱）`, mode: 'catch', hpRatio: ratio };
       }
-      if (target.dist <= (CFG.player.catchCloseDist ?? 4.5)) {
+      if (target.dist <= CATCH_CLOSE_DIST) {
         return { text: `[E] 近距离捕获 / [左键] 狩猎`, mode: 'catch', hpRatio: ratio };
       }
       return { text: `[Shift] 冲刺追猎 · [左键] 打伤后 E 捕获`, mode: 'neutral', hpRatio: ratio };

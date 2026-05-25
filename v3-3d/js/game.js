@@ -3,7 +3,7 @@ import { CFG, CREATURES, RESOURCES, ENTITY_LABELS, ITEMS, RECIPES } from './conf
 import { HumanCharacter } from './human.js';
 import { World3D } from './world.js';
 import { GameInput } from './input.js';
-import { GameUI } from './ui.js';
+import { GameUI } from './ui.js?v=20250527d';
 import { VfxManager } from './effects.js';
 import { CraftSystem } from './craft.js';
 import { BuildSystem } from './buildings.js';

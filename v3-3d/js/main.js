@@ -1,4 +1,4 @@
-import { Game3D } from './game.js';
+import { Game3D } from './game.js?v=20250527d';
 import { preloadCharacter } from './human.js';
 
 const game = new Game3D();
