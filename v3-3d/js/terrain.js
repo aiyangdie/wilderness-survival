@@ -1,6 +1,10 @@
 /** 与地形网格一致的高度采样（避免每帧 Raycaster） */
 export function terrainHeight(x, z) {
-  return (Math.sin(x * 0.08) + Math.cos(z * 0.07)) * 1.2;
+  const h1 = Math.sin(x * 0.06) * Math.cos(z * 0.055) * 1.35;
+  const h2 = Math.sin(x * 0.14 + 1.2) * Math.cos(z * 0.12) * 0.45;
+  const h3 = Math.sin((x + z) * 0.04) * 0.35;
+  const ridge = Math.max(0, Math.sin(x * 0.025) * Math.sin(z * 0.022)) * 0.6;
+  return h1 + h2 + h3 + ridge;
 }
 
 export class HeightField {

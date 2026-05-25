@@ -3,15 +3,28 @@ import { CFG, RESOURCES, CREATURES } from './config.js';
 import { HeightField, terrainHeight } from './terrain.js';
 import { createCreatureVisual } from './creatures.js';
 
+function stdMat(color, rough = 0.88, metal = 0.02, emissive = 0x000000, emInt = 0) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness: rough,
+    metalness: metal,
+    emissive,
+    emissiveIntensity: emInt,
+    flatShading: false,
+  });
+}
+
 const shared = {
-  trunkGeo: new THREE.CylinderGeometry(0.22, 0.3, 2, 4),
-  crownGeo: new THREE.ConeGeometry(1.1, 2.4, 4),
-  rockGeo: new THREE.DodecahedronGeometry(0.75, 0),
-  bushGeo: new THREE.SphereGeometry(0.55, 4, 4),
-  trunkMat: new THREE.MeshLambertMaterial({ color: 0x6b4a32 }),
-  crownMat: new THREE.MeshLambertMaterial({ color: 0x4a9a52 }),
-  rockMat: new THREE.MeshLambertMaterial({ color: 0x8a949e }),
-  bushMat: new THREE.MeshLambertMaterial({ color: 0x58b878 }),
+  trunkGeo: new THREE.CylinderGeometry(0.22, 0.32, 2, 6),
+  crownGeo: new THREE.ConeGeometry(1.1, 2.5, 8),
+  rockGeo: new THREE.DodecahedronGeometry(0.75, 1),
+  bushGeo: new THREE.SphereGeometry(0.55, 6, 5),
+  trunkMat: stdMat(0x5c4030, 0.95),
+  crownMat: stdMat(0x3d8f48, 0.82),
+  crownMat2: stdMat(0x52a85c, 0.78),
+  rockMat: stdMat(0x7a858f, 0.75, 0.05),
+  bushMat: stdMat(0x48a868, 0.85),
+  bushFlower: stdMat(0x7acc6a, 0.9),
 };
 
 /** InstancedMesh 批量渲染，极大减少 draw call */
@@ -93,11 +106,31 @@ export class World3D {
     }
     groundGeo.computeVertexNormals();
 
+    const colors = new Float32Array(pos.count * 3);
+    const cLow = new THREE.Color(0x5a9048);
+    const cHigh = new THREE.Color(0x8ec878);
+    const cDirt = new THREE.Color(0x7a6a48);
+    for (let i = 0; i < pos.count; i++) {
+      const h = pos.getZ(i);
+      const t = Math.max(0, Math.min(1, (h + 1.5) / 3.2));
+      const col = cLow.clone().lerp(cHigh, t);
+      if (t < 0.35) col.lerp(cDirt, 0.35 - t);
+      colors[i * 3] = col.r;
+      colors[i * 3 + 1] = col.g;
+      colors[i * 3 + 2] = col.b;
+    }
+    groundGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
     const ground = new THREE.Mesh(
       groundGeo,
-      new THREE.MeshLambertMaterial({ color: CFG.lighting.day.ground, flatShading: true })
+      new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.92,
+        metalness: 0,
+      })
     );
     ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = false;
     this.scene.add(ground);
     this.ground = ground;
 
@@ -163,8 +196,8 @@ export class World3D {
 
     if (type === 'tree') {
       batchIdx = this.batches.trunk.count;
-      this.batches.trunk.setAt(batchIdx, x, y + 1, z);
-      this.batches.crown.setAt(batchIdx, x, y + 2.8, z);
+      this.batches.trunk.setAt(batchIdx, x, y + 1, z, 0.92 + Math.random() * 0.2);
+      this.batches.crown.setAt(batchIdx, x, y + 2.85, z, 0.88 + Math.random() * 0.28);
       batchKey = 'tree';
     } else if (type === 'rock') {
       batchIdx = this.batches.rock.add(x, y + 0.45, z);

@@ -221,6 +221,7 @@ export class HumanCharacter {
         action.setEffectiveWeight(0);
         this.actions[clip.name] = action;
       }
+      this._upgradeModelMaterials();
       this.useGltf = true;
       this._playLoco(CLIPS.idle, 0.01);
     } catch {
@@ -228,6 +229,23 @@ export class HumanCharacter {
       this.group.add(this.procedural.group);
     }
     this.loaded = true;
+  }
+
+  _upgradeModelMaterials() {
+    if (!this.model) return;
+    this.model.traverse((obj) => {
+      if (!obj.isMesh || obj.userData.matUpgraded) return;
+      const prev = obj.material;
+      const mat = new THREE.MeshStandardMaterial({
+        color: prev.color?.clone?.() ?? prev.color ?? 0xcccccc,
+        map: prev.map || null,
+        roughness: 0.62,
+        metalness: 0.18,
+      });
+      if (prev.map) mat.map.colorSpace = THREE.SRGBColorSpace;
+      obj.material = mat;
+      obj.userData.matUpgraded = true;
+    });
   }
 
   _bindBones() {

@@ -1,6 +1,6 @@
 export const CFG = {
   worldSize: 140,
-  terrainSegments: 18,
+  terrainSegments: 24,
   daySeconds: 180,
   entityCullDist: 42,
   entityAiDist: 30,
@@ -53,15 +53,16 @@ export const CFG = {
     focusMinDist: 1.8,
   },
   render: {
-    dpr: 1,
+    dpr: 1.5,
     maxDt: 0.05,
-    exposure: 1.28,
+    exposure: 1.12,
+    antialias: true,
   },
   lighting: {
-    dawn: { sunY: 38, sun: 1.05, amb: 0.78, hemi: 0.52, bg: 0xb8daf5, fog: 0xd8ecff, fogNear: 90, fogFar: 210, ground: 0x6faa65 },
-    day: { sunY: 68, sun: 1.5, amb: 0.92, hemi: 0.62, bg: 0xa8dcff, fog: 0xc8e6ff, fogNear: 100, fogFar: 230, ground: 0x78c868 },
-    dusk: { sunY: 32, sun: 1.0, amb: 0.72, hemi: 0.48, bg: 0xf5d8b0, fog: 0xfae8c8, fogNear: 85, fogFar: 200, ground: 0x6ea058 },
-    night: { sunY: 28, sun: 0.62, amb: 0.5, hemi: 0.38, bg: 0x4a6888, fog: 0x5a7898, fogNear: 75, fogFar: 175, ground: 0x527a50 },
+    dawn: { sunY: 38, sun: 1.08, amb: 0.82, hemi: 0.55, rim: 0.32, bg: 0xb8daf5, fog: 0xd8ecff, fogNear: 95, fogFar: 240, ground: 0x6faa65 },
+    day: { sunY: 72, sun: 1.65, amb: 0.95, hemi: 0.68, rim: 0.42, bg: 0x9ed4ff, fog: 0xb8e0ff, fogNear: 110, fogFar: 260, ground: 0x72c060 },
+    dusk: { sunY: 32, sun: 1.05, amb: 0.75, hemi: 0.5, rim: 0.28, bg: 0xf5d8b0, fog: 0xfae8c8, fogNear: 88, fogFar: 210, ground: 0x6ea058 },
+    night: { sunY: 28, sun: 0.7, amb: 0.55, hemi: 0.42, rim: 0.55, bg: 0x3d5878, fog: 0x4a6888, fogNear: 80, fogFar: 190, ground: 0x4a7050 },
   },
 };
 

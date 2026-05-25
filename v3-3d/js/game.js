@@ -5,6 +5,7 @@ import { World3D } from './world.js';
 import { GameInput } from './input.js';
 import { GameUI } from './ui.js';
 import { VfxManager } from './effects.js';
+import { AtmosphereFX, attachGroundShadow } from './atmosphere.js';
 import { CraftSystem } from './craft.js';
 import { BuildSystem } from './buildings.js';
 import { EquipmentManager } from './equipment.js';
@@ -105,11 +106,14 @@ export class Game3D {
     this.scene.fog = new THREE.Fog(dayFog.fog, dayFog.fogNear, dayFog.fogFar);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.2, 280);
-    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, CFG.render.dpr));
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: CFG.render.antialias !== false,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, CFG.render.dpr ?? 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.LinearToneMapping;
-    this.renderer.toneMappingExposure = CFG.render.exposure ?? 1.2;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = CFG.render.exposure ?? 1.12;
     this.renderer.shadowMap.enabled = false;
     document.body.appendChild(this.renderer.domElement);
     this.canvas = this.renderer.domElement;
@@ -126,6 +130,10 @@ export class Game3D {
 
     this.hemi = new THREE.HemisphereLight(0xc8e4ff, 0x7ab86a, 0.58);
     this.scene.add(this.hemi);
+
+    this.rim = new THREE.DirectionalLight(0xa8c8ff, 0.38);
+    this.rim.position.set(-35, 28, -42);
+    this.scene.add(this.rim);
   }
 
   _newPlayer() {
@@ -196,7 +204,12 @@ export class Game3D {
     this.world = new World3D(this.scene);
     this.world.generate();
     this.vfx = new VfxManager(this.scene);
+    if (this.atmosphere) this.atmosphere.dispose();
+    this.atmosphere = new AtmosphereFX(this.scene);
     this.buildSys = new BuildSystem(this.scene, this.world);
+    if (!this._playerShadow) {
+      this._playerShadow = attachGroundShadow(this.human.group, 0.75, 0.35);
+    }
 
     const spawnY = this.world.getHeightAt(0, 0);
     this.player = this._newPlayer();
@@ -318,6 +331,8 @@ export class Game3D {
       this._updateLighting();
       this._lastLitPhase = this.phase;
     }
+    this.atmosphere?.setPhase(this.phase === 'night');
+    this.atmosphere?.update(dt, p.x, p.z);
 
     const shelterHeal = this._getShelterHeal(p.x, p.z);
     if (shelterHeal > 0) {
@@ -610,7 +625,21 @@ export class Game3D {
 
       if (moved || distSq < animDistSq) {
         if (moved || distSq < nearAnimSq || aiFrame === 0) {
-          e.visual.update(dt, moved, e.def?.speed || 5);
+          let mood = 'idle';
+          if (e.passive && distSq < 121) mood = 'flee';
+          else if (e.def?.hostile && distSq < (e.def.aggro || 20) ** 2) mood = 'hunt';
+          if ((e._hurtTimer ?? 0) > 0) e._hurtTimer -= dt;
+          const mx = e.x - (e._faceX ?? e.x);
+          const mz = e.z - (e._faceZ ?? e.z);
+          const faceYaw =
+            moved && mx * mx + mz * mz > 0.0001
+              ? Math.atan2(mx, mz)
+              : Math.atan2(dx, dz);
+          e.visual.update(dt, moved, e.def?.speed || 5, {
+            mood: (e._hurtTimer ?? 0) > 0 ? 'hurt' : mood,
+            hpRatio: e.hp / e.maxHp,
+            faceYaw,
+          });
         }
       }
 
@@ -658,6 +687,8 @@ export class Game3D {
     const e = target.entity;
     const dmg = CFG.player.attackDamage + stats.attackBonus;
     e.hp -= dmg;
+    e._hurtTimer = 0.32;
+    e.visual?.triggerHurt?.();
 
     const col = e.def?.hostile ? 0xff4444 : 0xffcc66;
     this.vfx.burst(e.x, e.y, e.z, col, 5);
@@ -706,6 +737,8 @@ export class Game3D {
       this._interactPulse = true;
       const e = target.entity;
       e.hp -= CFG.player.interactDamage + stats.interactBonus;
+      e._hurtTimer = 0.22;
+      e.visual?.triggerHurt?.();
       this.vfx.burst(e.x, e.y, e.z, 0x8fbc8f, 3);
       if (e.hp <= 0) {
         this._killEntity(e, true);
@@ -931,6 +964,7 @@ export class Game3D {
     this.sun.intensity = pr.sun;
     this.ambient.intensity = pr.amb;
     this.hemi.intensity = pr.hemi;
+    if (this.rim) this.rim.intensity = pr.rim ?? 0.38;
     this.hemi.color.setHex(0xc8e4ff);
     this.hemi.groundColor.setHex(this.phase === 'night' ? 0x4a6848 : 0x7ab86a);
     this.scene.background.setHex(pr.bg);
