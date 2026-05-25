@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES } from './config.js';
+import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES, CFG } from './config.js';
 
 const FLOAT_POOL = 10;
 const LABEL_MAX = 4;
@@ -58,6 +58,7 @@ export class GameUI {
     this._invHash = '';
     this._lastPrompt = '';
     this._invDirty = true;
+    this._barPct = {};
 
     for (let i = 0; i < LABEL_MAX; i++) {
       const d = document.createElement('div');
@@ -73,7 +74,7 @@ export class GameUI {
       el.className = 'float-text';
       el.style.display = 'none';
       this.els.floatLayer.appendChild(el);
-      this._floatPool.push({ el, active: false, vy: 0, age: 0, max: 0.9 });
+      this._floatPool.push({ el, active: false, vy: 0, age: 0, max: 0.9, screenX: 0, screenY: 0 });
     }
   }
 
@@ -123,7 +124,10 @@ export class GameUI {
   updateBars(player, sprinting) {
     const set = (key, v, max = 100) => {
       const pct = Math.max(0, Math.min(100, (v / max) * 100));
-      this.els.bars[key].style.width = `${pct}%`;
+      if (this._barPct[key] !== pct) {
+        this._barPct[key] = pct;
+        this.els.bars[key].style.width = `${pct}%`;
+      }
       this.els.vals[key].textContent = Math.ceil(v);
       const wrap = this.els.bars[key].parentElement;
       wrap.classList.toggle('low', pct < 25);
@@ -298,11 +302,12 @@ export class GameUI {
     slot.active = true;
     slot.age = 0;
     slot.vy = -40;
+    slot.screenX = pos.x;
+    slot.screenY = pos.y;
     slot.el.className = `float-text ${kind}`;
     slot.el.textContent = text;
     slot.el.style.display = 'block';
-    slot.el.style.left = `${pos.x}px`;
-    slot.el.style.top = `${pos.y}px`;
+    slot.el.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0) translate(-50%, -50%)`;
     slot.el.style.opacity = '1';
     this._floatActive.push(slot);
   }
@@ -321,8 +326,8 @@ export class GameUI {
       const f = this._floatActive[i];
       f.age += dt;
       f.vy -= 20 * dt;
-      const top = parseFloat(f.el.style.top) + f.vy * dt;
-      f.el.style.top = `${top}px`;
+      f.screenY += f.vy * dt;
+      f.el.style.transform = `translate3d(${f.screenX}px, ${f.screenY}px, 0) translate(-50%, -50%)`;
       f.el.style.opacity = String(Math.max(0, 1 - f.age / f.max));
       if (f.age >= f.max) {
         f.active = false;

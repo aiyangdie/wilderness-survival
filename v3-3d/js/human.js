@@ -98,6 +98,7 @@ export class HumanCharacter {
     this.locoState = 'idle';
     this.phase = 'locomote';
     this._attackStarted = false;
+    this._lastTimeScale = 1;
   }
 
   async load() {
@@ -162,24 +163,30 @@ export class HumanCharacter {
     this.animState = name;
   }
 
+  _setTimeScale(scale) {
+    if (this._lastTimeScale === scale || !this.activeAction) return;
+    this.activeAction.setEffectiveTimeScale(scale);
+    this._lastTimeScale = scale;
+  }
+
   _applyLocoAnim(speed, onGround) {
     const pick = this._pickLoco(speed, onGround);
     if (pick === 'air') {
       this.locoState = 'air';
       this._playLoco('Run', 0.12);
-      if (this.activeAction) this.activeAction.setEffectiveTimeScale(0.42);
+      this._setTimeScale(0.42);
       return;
     }
     this.locoState = pick;
     if (pick === 'run') {
       this._playLoco('Run', 0.15);
-      if (this.activeAction) this.activeAction.setEffectiveTimeScale(1.04);
+      this._setTimeScale(1.04);
     } else if (pick === 'walk') {
       this._playLoco('Walk', 0.15);
-      if (this.activeAction) this.activeAction.setEffectiveTimeScale(1);
+      this._setTimeScale(1);
     } else {
       this._playLoco('Idle', 0.2);
-      if (this.activeAction) this.activeAction.setEffectiveTimeScale(1);
+      this._setTimeScale(1);
     }
   }
 

@@ -19,6 +19,7 @@ export class VfxManager {
   constructor(scene) {
     this.scene = scene;
     this.pool = [];
+    this.active = [];
     this.activeCount = 0;
 
     for (let i = 0; i < POOL_SIZE; i++) {
@@ -87,6 +88,7 @@ export class VfxManager {
         upSpeed + Math.random(),
         (Math.random() - 0.5) * spread * 2
       );
+      this.active.push(p);
       spawned += 1;
       if (spawned >= count) break;
     }
@@ -122,8 +124,11 @@ export class VfxManager {
 
   update(dt) {
     if (this._focusVisible) {
-      this._pulseT += dt * 5;
-      this.focusRing.material.opacity = 0.42 + Math.sin(this._pulseT) * 0.15;
+      this._pulseT = (this._pulseT ?? 0) + dt * 5;
+      this._pulseFrame = (this._pulseFrame ?? 0) + 1;
+      if (this._pulseFrame % 2 === 0) {
+        this.focusRing.material.opacity = 0.42 + Math.sin(this._pulseT) * 0.15;
+      }
     }
     if (this.slashTimer > 0) {
       this.slashTimer -= dt;
@@ -131,12 +136,13 @@ export class VfxManager {
       if (this.slashTimer <= 0) this.slashMesh.visible = false;
     }
 
-    for (const p of this.pool) {
-      if (!p.active) continue;
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const p = this.active[i];
       p.age += dt;
       if (p.age >= p.life) {
         p.active = false;
         p.mesh.visible = false;
+        this.active.splice(i, 1);
         continue;
       }
       p.vel.y -= 9 * dt;
@@ -150,6 +156,7 @@ export class VfxManager {
       p.active = false;
       p.mesh.visible = false;
     }
+    this.active.length = 0;
     this.focusRing.visible = false;
     this.slashMesh.visible = false;
   }

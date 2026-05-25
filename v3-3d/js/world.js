@@ -24,8 +24,19 @@ class PropBatch {
     scene.add(this.mesh);
     this.max = max;
     this.count = 0;
+    this._dirty = false;
     this._dummy = new THREE.Object3D();
     this._hidden = new THREE.Vector3(0, -999, 0);
+  }
+
+  _markDirty() {
+    this._dirty = true;
+  }
+
+  flush() {
+    if (!this._dirty) return;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this._dirty = false;
   }
 
   add(x, y, z, sy = 1) {
@@ -33,7 +44,7 @@ class PropBatch {
     const i = this.count++;
     this._set(i, x, y, z, sy);
     this.mesh.count = this.count;
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this._markDirty();
     return i;
   }
 
@@ -44,7 +55,7 @@ class PropBatch {
       this.count = i + 1;
       this.mesh.count = this.count;
     }
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this._markDirty();
   }
 
   _set(i, x, y, z, sy = 1) {
@@ -57,7 +68,7 @@ class PropBatch {
   hide(i) {
     if (i < 0) return;
     this._set(i, -999, -999, -999, 0.001);
-    this.mesh.instanceMatrix.needsUpdate = true;
+    this._markDirty();
   }
 }
 
@@ -239,9 +250,11 @@ export class World3D {
     for (const c of list) {
       const dx = x - c.x;
       const dz = z - c.z;
-      const dist = Math.hypot(dx, dz);
+      const distSq = dx * dx + dz * dz;
       const min = c.r + radius;
-      if (dist < min && dist > 0.0001) {
+      const minSq = min * min;
+      if (distSq < minSq && distSq > 0.0000001) {
+        const dist = Math.sqrt(distSq);
         const push = (min - dist) / dist;
         x += dx * push;
         z += dz * push;
@@ -270,6 +283,10 @@ export class World3D {
 
   invalidateColliderCache() {
     this._colliderCache = null;
+  }
+
+  flushPropBatches() {
+    for (const b of Object.values(this.batches)) b.flush();
   }
 
   spawnNightMonsters() {
@@ -345,13 +362,67 @@ export class World3D {
   }
 
   getFocusTarget(px, pz, interactRange, attackRange, isNight) {
-    const catchT = this.getCatchable(px, pz, CFG.player.catchRange, CFG.player.catchHpRatio);
-    const attack = this.getAttackTarget(px, pz, attackRange, isNight);
-    const interact = this.getInteractable(px, pz, interactRange);
-    if (catchT) return catchT;
-    if (attack && attack.dist < 3.2) return attack;
-    if (interact) return interact;
-    if (attack) return attack;
+    const catchRange = CFG.player.catchRange;
+    const catchHpRatio = CFG.player.catchHpRatio;
+    const closeDist = CFG.player.catchCloseDist ?? 4.5;
+    const closeRatio = CFG.player.catchCloseHpRatio ?? 0.72;
+    const maxRange = Math.max(interactRange, attackRange, catchRange);
+    const maxRangeSq = maxRange * maxRange;
+
+    let catchT = null;
+    let catchD = catchRange;
+    let hostile = null;
+    let hostileD = attackRange;
+    let passive = null;
+    let passiveD = attackRange;
+    let interact = null;
+    let interactD = interactRange;
+
+    for (const e of this.entities) {
+      if (e.dead) continue;
+      const dx = e.x - px;
+      const dz = e.z - pz;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= maxRangeSq) continue;
+      const d = Math.sqrt(distSq);
+
+      if (e.passive && d < catchD) {
+        const hpOk = e.hp <= e.maxHp * catchHpRatio;
+        const closeOk = d <= closeDist && e.hp <= e.maxHp * closeRatio;
+        if (hpOk || closeOk) {
+          catchD = d;
+          catchT = e;
+        }
+      }
+
+      if (d < attackRange) {
+        const c = CREATURES[e.type];
+        if (c?.hostile && !(c.nightOnly && !isNight)) {
+          if (d < hostileD) {
+            hostileD = d;
+            hostile = e;
+          }
+        } else if (e.passive && d < passiveD) {
+          passiveD = d;
+          passive = e;
+        }
+      }
+
+      if (RESOURCES[e.type] && d < interactD) {
+        interactD = d;
+        interact = e;
+      }
+    }
+
+    if (catchT) return this._wrapTarget(catchT, catchD, 'catch');
+    if (hostile) {
+      const ht = this._wrapTarget(hostile, hostileD, 'hostile');
+      if (hostileD < 3.2) return ht;
+      if (interact) return this._wrapTarget(interact, interactD, 'resource');
+      return ht;
+    }
+    if (interact) return this._wrapTarget(interact, interactD, 'resource');
+    if (passive) return this._wrapTarget(passive, passiveD, 'passive');
     return null;
   }
 }

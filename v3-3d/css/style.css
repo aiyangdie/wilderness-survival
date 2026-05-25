@@ -495,7 +495,9 @@ canvas {
 
 .float-text {
   position: absolute;
-  transform: translate(-50%, -50%);
+  left: 0;
+  top: 0;
+  will-change: transform, opacity;
   font-weight: 700;
   font-size: 1rem;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);

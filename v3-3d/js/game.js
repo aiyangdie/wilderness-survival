@@ -63,6 +63,14 @@ export class Game3D {
     this._preyDistCache = Infinity;
     this._preyDistTimer = 0;
     this._nearColliders = null;
+    this._shakeOff = new THREE.Vector3();
+    this._frame = 0;
+    this._lastGroundX = 0;
+    this._lastGroundZ = 0;
+    this._camGroundY = 0;
+    this._camGroundFrame = 0;
+    this._shelterCache = { x: 0, z: 0, val: 0 };
+    this._deadPending = 0;
 
     this._initRenderer();
     this.ui = new GameUI();
@@ -243,11 +251,21 @@ export class Game3D {
       this._update(logicDt, rawDt);
       this.vfx?.update(logicDt);
       this.ui.updateFloats(logicDt);
+      this._render();
+    } else if ((this._pauseRenderCd = (this._pauseRenderCd ?? 0) + 1) % 4 === 0) {
+      this._render();
     }
-
-    this._render();
     this.input.endFrame();
     this.rafId = requestAnimationFrame(() => this._loop());
+  }
+
+  _getShelterHeal(px, pz) {
+    const c = this._shelterCache;
+    if (Math.abs(px - c.x) < 2 && Math.abs(pz - c.z) < 2) return c.val;
+    c.x = px;
+    c.z = pz;
+    c.val = this.buildSys?.getShelterHeal(px, pz) || 0;
+    return c.val;
   }
 
   _update(dt, animDt = dt) {
@@ -256,6 +274,7 @@ export class Game3D {
 
     if (this.craftOpen) return;
     this._animDt = animDt;
+    this._frame += 1;
 
     if (this.input.yawDelta) this.yaw += this.input.yawDelta;
     if (this.input.pitchDelta) {
@@ -284,12 +303,13 @@ export class Game3D {
     this._updateTime(dt);
     const sprinting = this._updatePlayer(dt);
     this._updateEntities(dt);
+    this.world.flushPropBatches();
     if (this.phase !== this._lastLitPhase) {
       this._updateLighting();
       this._lastLitPhase = this.phase;
     }
 
-    const shelterHeal = this.buildSys?.getShelterHeal(p.x, p.z) || 0;
+    const shelterHeal = this._getShelterHeal(p.x, p.z);
     if (shelterHeal > 0) {
       p.health = Math.min(100, p.health + shelterHeal * dt);
     }
@@ -335,13 +355,15 @@ export class Game3D {
 
   _nearestPassiveDist() {
     const p = this.player;
-    let best = Infinity;
+    let bestSq = Infinity;
     for (const e of this.world.entities) {
       if (e.dead || !e.passive) continue;
-      const d = Math.hypot(e.x - p.x, e.z - p.z);
-      if (d < best) best = d;
+      const dx = e.x - p.x;
+      const dz = e.z - p.z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq < bestSq) bestSq = dSq;
     }
-    return best;
+    return bestSq === Infinity ? Infinity : Math.sqrt(bestSq);
   }
 
   _movePassiveFlee(e, dx, dz, dist, def, dt, sprinting) {
@@ -420,7 +442,15 @@ export class Game3D {
       }
     }
 
-    p.groundY = this.world.getHeightAt(p.x, p.z);
+    const groundMoved =
+      Math.abs(p.x - this._lastGroundX) > 0.12 ||
+      Math.abs(p.z - this._lastGroundZ) > 0.12 ||
+      !p.onGround;
+    if (groundMoved) {
+      p.groundY = this.world.getHeightAt(p.x, p.z);
+      this._lastGroundX = p.x;
+      this._lastGroundZ = p.z;
+    }
     const groundY = p.groundY;
 
     if (this.input.justPressed('Space') && (p.onGround || this.coyoteTimer > 0)) {
@@ -465,6 +495,13 @@ export class Game3D {
     const pz = p.z;
 
     const sprinting = this.input.wantsSprint() && p.stamina > 8;
+    const aiDistSq = CFG.entityAiDist * CFG.entityAiDist;
+    const cullDistSq = CFG.entityCullDist * CFG.entityCullDist;
+    const visibleDistSq = CFG.entityVisibleDist * CFG.entityVisibleDist;
+    const animDistSq = CFG.entityAnimDist * CFG.entityAnimDist;
+    const nearAnimSq = 144;
+    const faceDistSq = 64;
+    const aiFrame = this._frame & 1;
 
     if (isNight && !this.nightSpawned) {
       this.world.spawnNightMonsters();
@@ -472,32 +509,38 @@ export class Game3D {
       this.ui.toast('夜晚降临！暗影怪物出现了！', 'danger');
     }
 
-    for (const e of this.world.entities) {
+    const ents = this.world.entities;
+    for (let i = 0; i < ents.length; i++) {
+      const e = ents[i];
       if (e.dead) continue;
       const dx = px - e.x;
       const dz = pz - e.z;
-      const dist = Math.hypot(dx, dz);
+      const distSq = dx * dx + dz * dz;
       let moved = false;
 
-      if (dist <= CFG.entityAiDist) {
+      if (distSq <= aiDistSq) {
+        const dist = Math.sqrt(distSq);
         const def = e.def;
         const prevX = e.x;
         const prevZ = e.z;
+        const runAi = distSq < 400 || aiFrame === 0;
 
-        if (e.passive && dist > 0.5 && dist < CFG.passive.fleeDist + 2) {
-          moved = this._movePassiveFlee(e, dx, dz, dist, def, dt, sprinting);
-        } else if (CREATURES[e.type] && !(def.nightOnly && !isNight)) {
-          if (dist < (def.aggro || 20) && dist > 0.5) {
-            e.x += (dx / dist) * def.speed * dt;
-            e.z += (dz / dist) * def.speed * dt;
-            const c = this.world.clampInBounds(e.x, e.z, e.radius || 1);
-            e.x = c.x;
-            e.z = c.z;
-            moved = true;
-            if (dist < 2.5 && p.invuln <= 0 && !protectedSpawn) {
-              const reduce = this._getCombatStats().damageReduce;
-              p.health -= (def.damage || 10) * dt * 1.5 * (1 - reduce);
-              p.invuln = 0.55;
+        if (runAi) {
+          if (e.passive && dist > 0.5 && dist < CFG.passive.fleeDist + 2) {
+            moved = this._movePassiveFlee(e, dx, dz, dist, def, dt, sprinting);
+          } else if (CREATURES[e.type] && !(def.nightOnly && !isNight)) {
+            if (dist < (def.aggro || 20) && dist > 0.5) {
+              e.x += (dx / dist) * def.speed * dt;
+              e.z += (dz / dist) * def.speed * dt;
+              const c = this.world.clampInBounds(e.x, e.z, e.radius || 1);
+              e.x = c.x;
+              e.z = c.z;
+              moved = true;
+              if (dist < 2.5 && p.invuln <= 0 && !protectedSpawn) {
+                const reduce = this._getCombatStats().damageReduce;
+                p.health -= (def.damage || 10) * dt * 1.5 * (1 - reduce);
+                p.invuln = 0.55;
+              }
             }
           }
         }
@@ -505,23 +548,23 @@ export class Game3D {
         moved = moved || Math.abs(e.x - prevX) > 0.02 || Math.abs(e.z - prevZ) > 0.02;
       }
 
-      if (dist > CFG.entityCullDist) continue;
+      if (distSq > cullDistSq) continue;
 
-      if (moved || dist < 14) {
+      if (moved || distSq < 196) {
         e.y = this.world.getHeightAt(e.x, e.z);
         e._lastX = e.x;
         e._lastZ = e.z;
         e._heightCd = 0;
-      } else if ((e._heightCd ?? 0) <= 0 && dist < 28) {
+      } else if ((e._heightCd ?? 0) <= 0 && distSq < 784) {
         e.y = this.world.getHeightAt(e.x, e.z);
-        e._heightCd = 0.28;
+        e._heightCd = 0.35;
       } else if (e._heightCd > 0) {
         e._heightCd -= dt;
       }
 
       if (!e.visual) continue;
 
-      const visible = dist < CFG.entityVisibleDist;
+      const visible = distSq < visibleDistSq;
       e.visual.setVisible(visible);
       if (!visible) continue;
 
@@ -533,19 +576,31 @@ export class Game3D {
         if (mx * mx + mz * mz > 0.00001) {
           e.visual.group.rotation.y = Math.atan2(mx, mz);
         }
-      } else if (CREATURES[e.type] && dist > 0.5) {
+      } else if (CREATURES[e.type] && distSq > 0.25 && distSq < faceDistSq) {
         e.visual.group.rotation.y = Math.atan2(dx, dz);
       }
 
-      if (moved || dist < CFG.entityAnimDist) {
-        e.visual.update(dt, moved, e.def?.speed || 5);
+      if (moved || distSq < animDistSq) {
+        if (moved || distSq < nearAnimSq || aiFrame === 0) {
+          e.visual.update(dt, moved, e.def?.speed || 5);
+        }
       }
 
       e._faceX = e.x;
       e._faceZ = e.z;
     }
 
-    this.world.entities = this.world.entities.filter((ent) => !ent.dead);
+    if (this._deadPending > 0) {
+      let write = 0;
+      for (let read = 0; read < ents.length; read++) {
+        if (!ents[read].dead) {
+          if (write !== read) ents[write] = ents[read];
+          write++;
+        }
+      }
+      ents.length = write;
+      this._deadPending = 0;
+    }
   }
 
   _getCombatStats() {
@@ -705,11 +760,18 @@ export class Game3D {
 
   _killEntity(e, harvest) {
     e.dead = true;
+    this._deadPending += 1;
     this.world.hideEntityVisual(e);
     if (RESOURCES[e.type]) {
-      this.world.colliders = this.world.colliders.filter(
-        (c) => Math.abs(c.x - e.x) > 0.1 || Math.abs(c.z - e.z) > 0.1
-      );
+      const cols = this.world.colliders;
+      for (let i = cols.length - 1; i >= 0; i--) {
+        const c = cols[i];
+        if (Math.abs(c.x - e.x) <= 0.1 && Math.abs(c.z - e.z) <= 0.1) {
+          cols[i] = cols[cols.length - 1];
+          cols.pop();
+          break;
+        }
+      }
       this.world.invalidateColliderCache();
     }
     const drops = e.def?.drop || {};
@@ -865,8 +927,11 @@ export class Game3D {
     );
 
     if (this.world) {
-      const gy = this.world.getHeightAt(this._camDesired.x, this._camDesired.z);
-      this._camDesired.y = Math.max(this._camDesired.y, gy + 1.2);
+      this._camGroundFrame += 1;
+      if (this._camGroundFrame % 2 === 0) {
+        this._camGroundY = this.world.getHeightAt(this._camDesired.x, this._camDesired.z);
+      }
+      this._camDesired.y = Math.max(this._camDesired.y, this._camGroundY + 1.2);
     } else if (this.player.groundY != null) {
       this._camDesired.y = Math.max(this._camDesired.y, this.player.groundY + 1.2);
     }
