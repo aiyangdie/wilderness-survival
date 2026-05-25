@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>荒野生存 - Wilderness Survival</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="hud-top">
+      <div class="stat-group">
+        <span class="stat" id="stat-health" title="生命值">❤️ <b>100</b></span>
+        <span class="stat" id="stat-hunger" title="饥饿">🍖 <b>100</b></span>
+        <span class="stat" id="stat-thirst" title="口渴">💧 <b>100</b></span>
+        <span class="stat" id="stat-stamina" title="体力">⚡ <b>100</b></span>
+      </div>
+      <div class="stat-group">
+        <span class="stat" id="stat-day" title="天数">📅 第 <b>1</b> 天</span>
+        <span class="stat" id="stat-time" title="时间">🌅 清晨</span>
+        <span class="stat" id="stat-score" title="生存分">⭐ <b>0</b></span>
+      </div>
+    </header>
+
+    <main id="game-wrap">
+      <canvas id="game-canvas" width="960" height="540"></canvas>
+      <div id="overlay-start" class="overlay visible">
+        <h1>荒野生存</h1>
+        <p>在荒野中活下去：采集、狩猎、建造、抵御怪物。</p>
+        <ul class="tips">
+          <li><kbd>WASD</kbd> 移动 · <kbd>Shift</kbd> 冲刺</li>
+          <li><kbd>左键</kbd> 攻击 · <kbd>E</kbd> 交互/采集</li>
+          <li><kbd>1-5</kbd> 快捷栏 · <kbd>B</kbd> 建造 · <kbd>C</kbd> 合成</li>
+          <li><kbd>Tab</kbd> 背包 · 夜晚怪物更危险</li>
+        </ul>
+        <button id="btn-start" type="button">开始生存</button>
+      </div>
+      <div id="overlay-dead" class="overlay">
+        <h2>你倒下了</h2>
+        <p>存活 <span id="dead-days">0</span> 天 · 得分 <span id="dead-score">0</span></p>
+        <button id="btn-restart" type="button">再次挑战</button>
+      </div>
+      <div id="toast" aria-live="polite"></div>
+    </main>
+
+    <aside id="hud-bottom">
+      <div id="hotbar"></div>
+      <div id="action-hint">靠近资源按 E 交互</div>
+    </aside>
+
+    <dialog id="dialog-craft">
+      <form method="dialog">
+        <h3>合成台</h3>
+        <div id="craft-list"></div>
+        <button value="cancel" type="submit">关闭 (C)</button>
+      </form>
+    </dialog>
+
+    <dialog id="dialog-build">
+      <form method="dialog">
+        <h3>建造模式</h3>
+        <p class="hint">选择建筑后，在地图上点击放置。按 Esc 取消。</p>
+        <div id="build-list"></div>
+        <button value="cancel" type="submit">关闭 (B)</button>
+      </form>
+    </dialog>
+
+    <dialog id="dialog-inventory">
+      <form method="dialog">
+        <h3>背包</h3>
+        <div id="inventory-grid"></div>
+        <button value="cancel" type="submit">关闭 (Tab)</button>
+      </form>
+    </dialog>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
