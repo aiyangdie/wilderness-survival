@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>荒野生存 3D - Wilderness Survival</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="hud">
+    <div class="hud-row">
+      <span id="h-health">❤️ 100</span>
+      <span id="h-hunger">🍖 100</span>
+      <span id="h-thirst">💧 100</span>
+      <span id="h-stamina">⚡ 100</span>
+    </div>
+    <div class="hud-row">
+      <span id="h-day">📅 第 1 天</span>
+      <span id="h-time">☀️ 白天</span>
+      <span id="h-score">⭐ 0</span>
+      <a class="back" href="../">← 版本选择</a>
+    </div>
+  </div>
+
+  <div id="overlay-start" class="overlay show">
+    <h1>荒野生存 3D</h1>
+    <p>第三人称拟真荒野生存 · 持续开发中</p>
+    <ul>
+      <li><kbd>WASD</kbd> 移动 · <kbd>Shift</kbd> 奔跑</li>
+      <li>鼠标移动视角 · <kbd>左键</kbd> 攻击 · <kbd>E</kbd> 采集/食用</li>
+      <li><kbd>空格</kbd> 跳跃 · 夜晚怪物来袭</li>
+    </ul>
+    <button id="btn-start">进入荒野（点击锁定鼠标）</button>
+  </div>
+
+  <div id="overlay-dead" class="overlay">
+    <h2>生存失败</h2>
+    <p>存活 <span id="dead-day">0</span> 天 · 得分 <span id="dead-score">0</span></p>
+    <button id="btn-restart">重新开始</button>
+  </div>
+
+  <div id="hint">点击画面开始 · 按 Esc 释放鼠标</div>
+  <div id="toast"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

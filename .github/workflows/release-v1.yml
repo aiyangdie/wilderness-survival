@@ -1,0 +1,43 @@
+name: Release v1 (2D download)
+
+on:
+  push:
+    tags:
+      - 'v1.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack v1-2d zip
+        run: |
+          cd v1-2d
+          zip -r ../wilderness-survival-v1-2d.zip . -x "*.DS_Store"
+          cd ..
+          echo "Packed $(du -h wilderness-survival-v1-2d.zip)"
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.0.0' }}
+          name: Wilderness Survival v1.0 (2D 经典版)
+          body: |
+            ## 2D 经典版下载包
+
+            - 解压后打开 `index.html` 即可本地游玩（无需联网）
+            - 在线游玩：https://aiyangdie.github.io/wilderness-survival/v1-2d/
+
+            ### 操作
+            WASD 移动 · 左键攻击 · E 交互 · C 合成 · B 建造
+          files: wilderness-survival-v1-2d.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
