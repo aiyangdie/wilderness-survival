@@ -1,26 +1,18 @@
 import * as THREE from 'three';
 import { CFG, RESOURCES, CREATURES } from './config.js';
 import { HeightField, terrainHeight } from './terrain.js';
+import { createCreatureVisual } from './creatures.js';
 
 const shared = {
   trunkGeo: new THREE.CylinderGeometry(0.22, 0.3, 2, 4),
   crownGeo: new THREE.ConeGeometry(1.1, 2.4, 4),
   rockGeo: new THREE.DodecahedronGeometry(0.75, 0),
   bushGeo: new THREE.SphereGeometry(0.55, 4, 4),
-  bodyGeo: new THREE.BoxGeometry(1, 0.75, 1.5),
   trunkMat: new THREE.MeshLambertMaterial({ color: 0x5c4033 }),
   crownMat: new THREE.MeshLambertMaterial({ color: 0x2d6a3e }),
   rockMat: new THREE.MeshLambertMaterial({ color: 0x6c757d }),
   bushMat: new THREE.MeshLambertMaterial({ color: 0x40916c }),
 };
-
-const creatureMats = new Map();
-function getCreatureMat(color) {
-  if (!creatureMats.has(color)) {
-    creatureMats.set(color, new THREE.MeshLambertMaterial({ color }));
-  }
-  return creatureMats.get(color);
-}
 
 /** InstancedMesh 批量渲染，极大减少 draw call */
 class PropBatch {
@@ -138,7 +130,7 @@ export class World3D {
   _createEntity(type, x, z, def) {
     const y = this.getHeightAt(x, z);
     let mesh = null;
-    let batch = null;
+    let visual = null;
     let batchIdx = -1;
     let batchKey = null;
 
@@ -154,18 +146,19 @@ export class World3D {
       batchIdx = this.batches.bush.add(x, y + 0.4, z);
       batchKey = 'bush';
     } else {
-      mesh = new THREE.Group();
-      mesh.position.set(x, y, z);
-      const body = new THREE.Mesh(shared.bodyGeo, getCreatureMat(def.color));
-      body.position.y = 0.55;
-      mesh.add(body);
-      this.scene.add(mesh);
+      visual = createCreatureVisual(type);
+      if (visual) {
+        visual.group.position.set(x, y, z);
+        this.scene.add(visual.group);
+        mesh = visual.group;
+      }
     }
 
     return {
-      id: crypto.randomUUID(),
+      id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
       type,
       mesh,
+      visual,
       batchKey,
       batchIdx,
       x,
@@ -190,6 +183,8 @@ export class World3D {
       this.batches.rock.hide(e.batchIdx);
     } else if (e.batchKey === 'bush') {
       this.batches.bush.hide(e.batchIdx);
+    } else if (e.visual) {
+      e.visual.dispose();
     } else if (e.mesh) {
       this.scene.remove(e.mesh);
     }

@@ -2,9 +2,10 @@ export const CFG = {
   worldSize: 140,
   terrainSegments: 20,
   daySeconds: 180,
-  entityCullDist: 38,
-  entityAiDist: 32,
-  entityVisibleDist: 45,
+  entityCullDist: 42,
+  entityAiDist: 30,
+  entityVisibleDist: 40,
+  entityAnimDist: 22,
   spawnInvuln: 4,
   player: {
     walkSpeed: 7,

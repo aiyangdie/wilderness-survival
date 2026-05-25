@@ -342,6 +342,8 @@ export class Game3D {
     const p = this.player;
     const isNight = this.phase === 'night';
     const protectedSpawn = this.spawnInvuln > 0;
+    const px = p.x;
+    const pz = p.z;
 
     if (isNight && !this.nightSpawned) {
       this.world.spawnNightMonsters();
@@ -351,45 +353,68 @@ export class Game3D {
 
     for (const e of this.world.entities) {
       if (e.dead) continue;
-      const dx = p.x - e.x;
-      const dz = p.z - e.z;
+      const dx = px - e.x;
+      const dz = pz - e.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > CFG.entityCullDist) continue;
+      let moved = false;
 
-      const aiDist = CFG.entityAiDist;
-      if (dist > aiDist) continue;
+      if (dist <= CFG.entityAiDist) {
+        const def = e.def;
+        const prevX = e.x;
+        const prevZ = e.z;
 
-      const def = e.def;
-      if (e.passive && dist > 0.5 && dist < 14) {
-        e.x -= (dx / dist) * def.speed * dt;
-        e.z -= (dz / dist) * def.speed * dt;
-      } else if (CREATURES[e.type] && !(def.nightOnly && !isNight)) {
-        if (dist < (def.aggro || 20) && dist > 0.5) {
-          e.x += (dx / dist) * def.speed * dt;
-          e.z += (dz / dist) * def.speed * dt;
-          if (dist < 2.5 && p.invuln <= 0 && !protectedSpawn) {
-            p.health -= (def.damage || 10) * dt * 1.5;
-            p.invuln = 0.55;
+        if (e.passive && dist > 0.5 && dist < 14) {
+          e.x -= (dx / dist) * def.speed * dt;
+          e.z -= (dz / dist) * def.speed * dt;
+        } else if (CREATURES[e.type] && !(def.nightOnly && !isNight)) {
+          if (dist < (def.aggro || 20) && dist > 0.5) {
+            e.x += (dx / dist) * def.speed * dt;
+            e.z += (dz / dist) * def.speed * dt;
+            if (dist < 2.5 && p.invuln <= 0 && !protectedSpawn) {
+              p.health -= (def.damage || 10) * dt * 1.5;
+              p.invuln = 0.55;
+            }
           }
         }
+
+        moved = Math.abs(e.x - prevX) > 0.02 || Math.abs(e.z - prevZ) > 0.02;
       }
 
-      const moved = Math.abs(e.x - e._lastX) > 0.08 || Math.abs(e.z - e._lastZ) > 0.08;
-      if (moved || dist < 16) {
+      if (dist > CFG.entityCullDist) continue;
+
+      if (moved || dist < 14) {
         e.y = this.world.getHeightAt(e.x, e.z);
         e._lastX = e.x;
         e._lastZ = e.z;
       }
-      if (e.mesh) {
-        e.mesh.position.set(e.x, e.y, e.z);
-        e.mesh.visible = dist < CFG.entityVisibleDist;
+
+      if (!e.visual) continue;
+
+      const visible = dist < CFG.entityVisibleDist;
+      e.visual.setVisible(visible);
+      if (!visible) continue;
+
+      e.visual.group.position.set(e.x, e.y, e.z);
+
+      if (moved) {
+        const mx = e.x - (e._faceX ?? e.x);
+        const mz = e.z - (e._faceZ ?? e.z);
+        if (mx * mx + mz * mz > 0.00001) {
+          e.visual.group.rotation.y = Math.atan2(mx, mz);
+        }
+      } else if (CREATURES[e.type] && dist > 0.5) {
+        e.visual.group.rotation.y = Math.atan2(dx, dz);
       }
-      if ((e.passive || CREATURES[e.type]) && dist > 0.5 && e.mesh) {
-        e.mesh.rotation.y = Math.atan2(dx, dz);
+
+      if (moved || dist < CFG.entityAnimDist) {
+        e.visual.update(dt, moved, e.def?.speed || 5);
       }
+
+      e._faceX = e.x;
+      e._faceZ = e.z;
     }
 
-    this.world.entities = this.world.entities.filter((e) => !e.dead);
+    this.world.entities = this.world.entities.filter((ent) => !ent.dead);
   }
 
   _attack() {
