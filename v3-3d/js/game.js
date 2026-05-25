@@ -1,22 +1,34 @@
 import * as THREE from 'three';
-import { CFG, CREATURES, RESOURCES } from './config.js';
+import { CFG, CREATURES, RESOURCES, ENTITY_LABELS } from './config.js';
 import { HumanCharacter } from './human.js';
 import { World3D } from './world.js';
+import { GameInput } from './input.js';
+import { GameUI } from './ui.js';
+
+const PHASE_LABELS = {
+  dawn: '🌅 清晨',
+  day: '☀️ 白天',
+  dusk: '🌇 黄昏',
+  night: '🌙 夜晚',
+};
 
 export class Game3D {
   constructor() {
     this.clock = new THREE.Clock();
-    this.keys = new Set();
-    this.keysJust = new Set();
-    this.mouseLocked = false;
-    this.yaw = 0;
-    this.pitch = 0.25;
     this.running = false;
+    this.paused = false;
     this.rafId = 0;
     this.interactCooldown = 0;
     this.hudTimer = 0;
     this.isAttacking = false;
     this.attackAnimTimer = 0;
+    this.coyoteTimer = 0;
+    this.invShow = true;
+    this.lastDamageFlash = 0;
+    this.prevHealth = 100;
+
+    this.yaw = 0;
+    this.pitch = 0.25;
 
     this._camPos = new THREE.Vector3();
     this._camTarget = new THREE.Vector3();
@@ -24,7 +36,27 @@ export class Game3D {
     this._moveDir = new THREE.Vector3();
     this._forward = new THREE.Vector3();
     this._right = new THREE.Vector3();
+    this._rawMove = new THREE.Vector3();
 
+    this._initRenderer();
+    this.ui = new GameUI();
+    this.input = new GameInput(this.canvas, () => this.togglePause());
+    this.ui.bindPauseControls(this.input, () => this.togglePause(false));
+
+    this.player = this._newPlayer();
+    this.inventory = { wood: 5, fiber: 3 };
+    this.day = 1;
+    this.time = 0;
+    this.phase = 'day';
+    this.nightSpawned = false;
+
+    document.getElementById('btn-start').onclick = () => this.start();
+    document.getElementById('btn-restart').onclick = () => this.start();
+    window.addEventListener('resize', () => this._resize());
+    this._resize();
+  }
+
+  _initRenderer() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
     this.scene.fog = new THREE.Fog(0x87ceeb, 50, 140);
@@ -52,83 +84,32 @@ export class Game3D {
     this.scene.add(this.sun.target);
     this.scene.add(new THREE.AmbientLight(0x8899aa, 0.5));
     this.scene.add(new THREE.HemisphereLight(0x87ceeb, 0x3d5a3c, 0.3));
-
-    this.world = null;
-    this.human = null;
-    this.player = this._newPlayer();
-    this.inventory = { wood: 5, fiber: 3 };
-    this.day = 1;
-    this.time = 0;
-    this.phase = 'day';
-    this.nightSpawned = false;
-
-    this.ui = {
-      start: document.getElementById('overlay-start'),
-      dead: document.getElementById('overlay-dead'),
-      hint: document.getElementById('hint'),
-      toast: document.getElementById('toast'),
-    };
-
-    this._bindEvents();
-    this._resize();
-    window.addEventListener('resize', () => this._resize());
   }
 
   _newPlayer() {
     return {
-      x: 0,
-      y: 0,
-      z: 0,
-      vy: 0,
-      onGround: true,
-      health: 100,
-      hunger: 100,
-      thirst: 100,
-      stamina: 100,
-      score: 0,
-      invuln: 0,
-      attackCd: 0,
-      alive: true,
+      x: 0, y: 0, z: 0, vy: 0, onGround: true,
+      health: 100, hunger: 100, thirst: 100, stamina: 100,
+      score: 0, invuln: 0, attackCd: 0, alive: true,
     };
   }
 
-  _bindEvents() {
-    window.addEventListener('keydown', (e) => {
-      if (!this.keys.has(e.code)) this.keysJust.add(e.code);
-      this.keys.add(e.code);
-      if (['Space', 'Tab'].includes(e.code)) e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-
-    this.canvas.addEventListener('mousemove', (e) => {
-      if (!this.mouseLocked || !this.running) return;
-      this.yaw -= e.movementX * 0.0022;
-      this.pitch = Math.max(-0.45, Math.min(0.55, this.pitch - e.movementY * 0.0022));
-    });
-
-    this.canvas.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      if (!this.running) return;
-      if (!this.mouseLocked) {
-        this.canvas.requestPointerLock();
-        return;
-      }
-      this._attack();
-    });
-
-    document.addEventListener('pointerlockchange', () => {
-      this.mouseLocked = document.pointerLockElement === this.canvas;
-      this.ui.hint.textContent = this.mouseLocked
-        ? 'WASD 移动 · 左键攻击 · E 采集'
-        : '点击画面锁定鼠标 · Esc 释放';
-    });
-
-    document.getElementById('btn-start').onclick = () => this.start();
-    document.getElementById('btn-restart').onclick = () => this.start();
+  togglePause(forceState) {
+    if (!this.running) return;
+    const next = forceState !== undefined ? forceState : !this.paused;
+    this.paused = next;
+    this.input.setPaused(next);
+    this.ui.showPause(next);
+    this.ui.setPointerHint(this.input.mouseLocked, next);
+    if (!next && !this.input.mouseLocked) {
+      this.canvas.requestPointerLock();
+    }
   }
 
   start() {
     if (this.rafId) cancelAnimationFrame(this.rafId);
+    this.paused = false;
+    this.ui.showPause(false);
 
     const keepTypes = new Set(['AmbientLight', 'HemisphereLight', 'DirectionalLight']);
     [...this.scene.children].forEach((c) => {
@@ -142,8 +123,6 @@ export class Game3D {
 
     const spawnY = this.world.getHeightAt(0, 0);
     this.player = this._newPlayer();
-    this.player.x = 0;
-    this.player.z = 0;
     this.player.y = spawnY;
     this.inventory = { wood: 5, fiber: 3 };
     this.day = 1;
@@ -153,28 +132,44 @@ export class Game3D {
     this.yaw = 0;
     this.pitch = 0.25;
     this.interactCooldown = 0;
+    this.prevHealth = 100;
+    this._camPos.set(0, 0, 0);
     this.clock.getDelta();
 
-    this.ui.start.classList.remove('show');
-    this.ui.dead.classList.remove('show');
+    this.ui.showStart(false);
+    this.ui.showDead(false);
+    document.querySelectorAll('.hud').forEach((el) => el.classList.remove('hidden'));
+
     this.running = true;
-    this.canvas.requestPointerLock();
-    this._toast('3D 荒野生存 — 点击画面开始操作');
+    this.input.setEnabled(true);
+    this.input.setPaused(false);
+    setTimeout(() => this.canvas.requestPointerLock(), 100);
+    this.ui.toast('点击画面锁定鼠标 · Esc 暂停', 'info');
     this._loop();
   }
 
   _loop() {
     if (!this.running) return;
     const dt = Math.min(this.clock.getDelta(), 1 / 30);
-    this._update(dt);
+    if (!this.paused) this._update(dt);
     this._render();
-    this.keysJust.clear();
+    this.input.endFrame();
     this.rafId = requestAnimationFrame(() => this._loop());
   }
 
   _update(dt) {
     const p = this.player;
     if (!p.alive) return;
+
+    if (this.input.yawDelta) this.yaw += this.input.yawDelta;
+    if (this.input.pitchDelta) {
+      this.pitch = Math.max(-0.45, Math.min(0.55, this.pitch + this.input.pitchDelta));
+    }
+
+    if (this.input.justPressed('Tab')) {
+      this.invShow = !this.invShow;
+      document.getElementById('hud-bottom').classList.toggle('hidden', !this.invShow);
+    }
 
     this._updateTime(dt);
     this._updatePlayer(dt);
@@ -183,7 +178,14 @@ export class Game3D {
 
     p.hunger = Math.max(0, p.hunger - CFG.decay.hunger * dt);
     p.thirst = Math.max(0, p.thirst - CFG.decay.thirst * dt);
-    if (p.hunger <= 0 || p.thirst <= 0) p.health = Math.max(0, p.health - 5 * dt);
+    if (p.hunger <= 0 || p.thirst <= 0) p.health = Math.max(0, p.health - 4 * dt);
+
+    if (p.health < this.prevHealth - 0.5) {
+      this.ui.flashDamage();
+      this.lastDamageFlash = 0.3;
+    }
+    this.prevHealth = p.health;
+
     if (p.invuln > 0) p.invuln -= dt;
     if (p.attackCd > 0) p.attackCd -= dt;
     if (this.interactCooldown > 0) this.interactCooldown -= dt;
@@ -191,51 +193,56 @@ export class Game3D {
       this.attackAnimTimer -= dt;
       if (this.attackAnimTimer <= 0) this.isAttacking = false;
     }
+    if (p.onGround) this.coyoteTimer = CFG.player.coyoteTime;
+    else this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
 
-    if (this.keysJust.has('KeyE')) this._interact();
+    if (this.input.clickAttack) this._attack();
+    if (this.input.wantsInteract()) this._interact();
 
     if (p.health <= 0) this._gameOver();
 
     this.hudTimer += dt;
-    if (this.hudTimer >= 0.1) {
+    if (this.hudTimer >= 0.08) {
       this.hudTimer = 0;
-      this._updateHUD();
+      this._refreshUI();
     }
   }
 
   _updatePlayer(dt) {
     const p = this.player;
-    const run = (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && p.stamina > 10;
+    const run = this.input.wantsSprint() && p.stamina > 8;
     const speed = run ? CFG.player.runSpeed : CFG.player.walkSpeed;
-    if (run) p.stamina = Math.max(0, p.stamina - 20 * dt);
-    else p.stamina = Math.min(100, p.stamina + 20 * dt);
+    if (run) p.stamina = Math.max(0, p.stamina - 18 * dt);
+    else p.stamina = Math.min(100, p.stamina + 22 * dt);
 
     this._forward.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     this._right.set(this._forward.z, 0, -this._forward.x);
 
-    this._moveDir.set(0, 0, 0);
-    if (this.keys.has('KeyW')) this._moveDir.add(this._forward);
-    if (this.keys.has('KeyS')) this._moveDir.sub(this._forward);
-    if (this.keys.has('KeyA')) this._moveDir.sub(this._right);
-    if (this.keys.has('KeyD')) this._moveDir.add(this._right);
-
+    const hasMove = this.input.getMoveVector(this._rawMove);
     let moving = false;
-    if (this._moveDir.lengthSq() > 0.0001) {
-      this._moveDir.normalize();
-      const nx = p.x + this._moveDir.x * speed * dt;
-      const nz = p.z + this._moveDir.z * speed * dt;
-      const resolved = this.world.resolveCircleMove(p.x, p.z, nx, nz, 0.55);
-      p.x = resolved.x;
-      p.z = resolved.z;
-      this.human.setRotationY(Math.atan2(this._moveDir.x, this._moveDir.z));
-      moving = true;
+
+    if (hasMove) {
+      this._moveDir
+        .copy(this._forward).multiplyScalar(-this._rawMove.z)
+        .addScaledVector(this._right, this._rawMove.x);
+      if (this._moveDir.lengthSq() > 0.0001) {
+        this._moveDir.normalize();
+        const nx = p.x + this._moveDir.x * speed * dt;
+        const nz = p.z + this._moveDir.z * speed * dt;
+        const resolved = this.world.resolveCircleMove(p.x, p.z, nx, nz, 0.55);
+        p.x = resolved.x;
+        p.z = resolved.z;
+        this.human.setRotationY(Math.atan2(this._moveDir.x, this._moveDir.z));
+        moving = true;
+      }
     }
 
     const groundY = this.world.getHeightAt(p.x, p.z);
 
-    if (this.keysJust.has('Space') && p.onGround) {
+    if (this.input.justPressed('Space') && (p.onGround || this.coyoteTimer > 0)) {
       p.vy = CFG.player.jumpForce;
       p.onGround = false;
+      this.coyoteTimer = 0;
     }
 
     if (!p.onGround) {
@@ -247,7 +254,8 @@ export class Game3D {
         p.onGround = true;
       }
     } else {
-      p.y = groundY;
+      p.y = THREE.MathUtils.lerp(p.y, groundY, Math.min(1, dt * 18));
+      if (Math.abs(p.y - groundY) < 0.05) p.y = groundY;
     }
 
     this.human.setPosition(p.x, p.y, p.z);
@@ -257,36 +265,31 @@ export class Game3D {
   _updateEntities(dt) {
     const p = this.player;
     const isNight = this.phase === 'night';
-    const cull = CFG.entityCullDist;
 
     if (isNight && !this.nightSpawned) {
       this.world.spawnNightMonsters();
       this.nightSpawned = true;
-      this._toast('夜晚降临！暗影怪物出现了！');
+      this.ui.toast('夜晚降临！暗影怪物出现了！', 'danger');
     }
 
     for (const e of this.world.entities) {
       if (e.dead) continue;
-
       const dx = p.x - e.x;
       const dz = p.z - e.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > cull) continue;
+      if (dist > CFG.entityCullDist) continue;
 
       const def = e.def;
-
-      if (e.passive && dist > 0.5) {
-        if (dist < 14) {
-          e.x -= (dx / dist) * def.speed * dt;
-          e.z -= (dz / dist) * def.speed * dt;
-        }
+      if (e.passive && dist > 0.5 && dist < 14) {
+        e.x -= (dx / dist) * def.speed * dt;
+        e.z -= (dz / dist) * def.speed * dt;
       } else if (CREATURES[e.type] && !(def.nightOnly && !isNight)) {
         if (dist < (def.aggro || 20) && dist > 0.5) {
           e.x += (dx / dist) * def.speed * dt;
           e.z += (dz / dist) * def.speed * dt;
-          if (dist < 2.4 && p.invuln <= 0) {
-            p.health -= (def.damage || 10) * dt * 1.8;
-            p.invuln = 0.5;
+          if (dist < 2.5 && p.invuln <= 0) {
+            p.health -= (def.damage || 10) * dt * 1.6;
+            p.invuln = 0.55;
           }
         }
       }
@@ -304,59 +307,94 @@ export class Game3D {
   _attack() {
     const p = this.player;
     if (p.attackCd > 0) return;
+
+    const target = this.world.getAttackTarget(
+      p.x, p.z, CFG.player.attackRange, this.phase === 'night'
+    );
+    if (!target) {
+      this.ui.toast('没有可攻击的目标', 'warn');
+      return;
+    }
+
     p.attackCd = CFG.player.attackCooldown;
     this.isAttacking = true;
-    this.attackAnimTimer = 0.35;
+    this.attackAnimTimer = 0.32;
 
-    const best = this.world.getAttackTarget(p.x, p.z, CFG.player.attackRange);
-    if (!best) return;
-
-    best.hp -= CFG.player.attackDamage;
-    if (best.hp <= 0) this._killEntity(best);
+    const e = target.entity;
+    e.hp -= CFG.player.attackDamage;
+    if (e.hp <= 0) {
+      this._killEntity(e, false);
+      const name = ENTITY_LABELS[e.type] || e.type;
+      this.ui.toast(`击败了 ${name}`, 'success');
+    }
   }
 
   _interact() {
     if (this.interactCooldown > 0) return;
     const p = this.player;
 
-    const near = this.world.getInteractable(p.x, p.z, CFG.player.interactRange);
-    if (near) {
-      this.interactCooldown = 0.35;
-      near.hp -= 18;
-      if (near.hp <= 0) {
-        this._killEntity(near, true);
-        this._toast('采集成功');
+    const target = this.world.getInteractable(p.x, p.z, CFG.player.interactRange);
+    if (target) {
+      this.interactCooldown = 0.32;
+      const e = target.entity;
+      e.hp -= CFG.player.interactDamage;
+      if (e.hp <= 0) {
+        this._killEntity(e, true);
+        const name = ENTITY_LABELS[e.type] || e.type;
+        this.ui.toast(`${target.def?.verb || '采集'}${name} 完成`, 'success');
+      } else {
+        const pct = Math.ceil((e.hp / e.maxHp) * 100);
+        this.ui.toast(`继续… 剩余 ${pct}%`, 'info');
       }
       return;
     }
 
     if ((this.inventory.meat || 0) > 0) {
-      this.interactCooldown = 0.5;
+      this.interactCooldown = 0.55;
       this.inventory.meat--;
-      p.hunger = Math.min(100, p.hunger + 28);
-      p.health = Math.min(100, p.health + 6);
-      this._toast('食用生肉');
+      p.hunger = Math.min(100, p.hunger + 30);
+      p.health = Math.min(100, p.health + 5);
+      this.ui.toast('食用生肉（建议烤肉）', 'warn');
+    } else {
+      this.ui.toast('附近没有可交互的资源', 'warn');
     }
   }
 
-  _killEntity(e, harvest = false) {
+  _killEntity(e, harvest) {
     e.dead = true;
     this.scene.remove(e.mesh);
     if (RESOURCES[e.type]) {
       this.world.colliders = this.world.colliders.filter(
-        (c) => Math.hypot(c.x - e.x, c.z - e.z) > 0.5
+        (c) => Math.abs(c.x - e.x) > 0.1 || Math.abs(c.z - e.z) > 0.1
       );
     }
-    const drop = e.def?.drop || {};
-    for (const [k, v] of Object.entries(drop)) {
+    for (const [k, v] of Object.entries(e.def?.drop || {})) {
       this.inventory[k] = (this.inventory[k] || 0) + v;
     }
-    const p = this.player;
     if (!harvest) {
-      p.score += e.type === 'shadow' ? 35 : e.type === 'wolf' ? 22 : 10;
-      if (!harvest) this._toast(`击败了 ${e.type}`);
+      this.player.score += e.type === 'shadow' ? 35 : e.type === 'wolf' ? 22 : 10;
     } else {
-      p.score += 8;
+      this.player.score += 8;
+    }
+  }
+
+  _refreshUI() {
+    const p = this.player;
+    this.ui.updateBars(p);
+    this.ui.updateMeta(this.day, PHASE_LABELS[this.phase] || '', this.time, p.score);
+    this.ui.updateInventory(this.inventory);
+    this.ui.setPointerHint(this.input.mouseLocked, this.paused);
+
+    const focus = this.world.getFocusTarget(
+      p.x, p.z, CFG.player.interactRange, CFG.player.attackRange, this.phase === 'night'
+    );
+    const prompt = this.ui.getTargetPrompt(focus, this.inventory);
+    if (prompt && this.input.mouseLocked) {
+      this.ui.setInteractPrompt(prompt.text, prompt.mode);
+      this.ui.setCrosshairMode(prompt.mode === 'danger' ? 'danger' : prompt.mode);
+    } else {
+      this.ui.setInteractPrompt(null);
+      this.ui.setCrosshairMode('neutral');
     }
   }
 
@@ -367,7 +405,7 @@ export class Game3D {
       this.day += 1;
       this.player.score += 50;
       this.nightSpawned = false;
-      this._toast(`第 ${this.day} 天`);
+      this.ui.toast(`第 ${this.day} 天`, 'success');
     }
     if (this.time < 0.18) this.phase = 'dawn';
     else if (this.time < 0.58) this.phase = 'day';
@@ -391,8 +429,9 @@ export class Game3D {
 
   _render() {
     const p = this.player;
-    const dist = 6.5;
-    const height = 2.8 + this.pitch * 1.5;
+    const cam = CFG.camera;
+    const dist = cam.dist;
+    const height = cam.height + this.pitch * 1.5;
 
     this._camDesired.set(
       p.x - Math.sin(this.yaw) * dist,
@@ -400,19 +439,21 @@ export class Game3D {
       p.z - Math.cos(this.yaw) * dist
     );
 
-    const groundAtCam = this.world.getHeightAt(this._camDesired.x, this._camDesired.z);
-    this._camDesired.y = Math.max(this._camDesired.y, groundAtCam + 1.2);
+    if (this.world) {
+      const gy = this.world.getHeightAt(this._camDesired.x, this._camDesired.z);
+      this._camDesired.y = Math.max(this._camDesired.y, gy + 1.2);
+    }
 
-    if (!this._camPos.lengthSq()) this._camPos.copy(this._camDesired);
-    this._camPos.lerp(this._camDesired, 0.14);
+    const smooth = this.paused ? 0.08 : cam.smooth;
+    if (this._camPos.lengthSq() < 0.01) this._camPos.copy(this._camDesired);
+    this._camPos.lerp(this._camDesired, smooth);
 
     this._camTarget.set(p.x, p.y + CFG.player.height * 0.85, p.z);
     this.camera.position.copy(this._camPos);
     this.camera.lookAt(this._camTarget);
 
-    const ppos = this.player;
-    this.sun.position.set(ppos.x + 35, this.sun.position.y, ppos.z + 25);
-    this.sun.target.position.set(ppos.x, ppos.y, ppos.z);
+    this.sun.position.set(p.x + 35, this.sun.position.y, p.z + 25);
+    this.sun.target.position.set(p.x, p.y, p.z);
     this.sun.target.updateMatrixWorld();
 
     this.renderer.render(this.scene, this.camera);
@@ -421,12 +462,12 @@ export class Game3D {
   _gameOver() {
     this.player.alive = false;
     this.running = false;
+    this.input.setEnabled(false);
     cancelAnimationFrame(this.rafId);
     this.rafId = 0;
     document.exitPointerLock();
-    this.ui.dead.classList.add('show');
-    document.getElementById('dead-day').textContent = String(this.day);
-    document.getElementById('dead-score').textContent = String(this.player.score);
+    document.querySelectorAll('.hud').forEach((el) => el.classList.add('hidden'));
+    this.ui.showDead(true, this.day, this.player.score);
   }
 
   _resize() {
@@ -435,32 +476,5 @@ export class Game3D {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
-  }
-
-  _updateHUD() {
-    const p = this.player;
-    const phaseLabel = { dawn: '🌅 清晨', day: '☀️ 白天', dusk: '🌇 黄昏', night: '🌙 夜晚' };
-    document.getElementById('h-health').textContent = `❤️ ${Math.ceil(p.health)}`;
-    document.getElementById('h-hunger').textContent = `🍖 ${Math.ceil(p.hunger)}`;
-    document.getElementById('h-thirst').textContent = `💧 ${Math.ceil(p.thirst)}`;
-    document.getElementById('h-stamina').textContent = `⚡ ${Math.ceil(p.stamina)}`;
-    document.getElementById('h-day').textContent = `📅 第 ${this.day} 天`;
-    document.getElementById('h-time').textContent = phaseLabel[this.phase] || '';
-    document.getElementById('h-score').textContent = `⭐ ${p.score}`;
-    const inv = Object.entries(this.inventory)
-      .filter(([, v]) => v > 0)
-      .map(([k, v]) => `${k}×${v}`)
-      .join(' ');
-    if (this.mouseLocked) {
-      this.ui.hint.textContent = inv ? `资源: ${inv} · E 采集/食用` : 'WASD 移动 · 左键攻击 · E 采集';
-    }
-  }
-
-  _toast(msg) {
-    const el = this.ui.toast;
-    el.textContent = msg;
-    el.classList.add('show');
-    clearTimeout(el._t);
-    el._t = setTimeout(() => el.classList.remove('show'), 2200);
   }
 }

@@ -3,45 +3,103 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>荒野生存 3D - Wilderness Survival</title>
+  <title>荒野生存 3D</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <div id="hud">
-    <div class="hud-row">
-      <span id="h-health">❤️ 100</span>
-      <span id="h-hunger">🍖 100</span>
-      <span id="h-thirst">💧 100</span>
-      <span id="h-stamina">⚡ 100</span>
+  <div id="damage-flash"></div>
+
+  <header id="hud" class="hud hidden">
+    <div class="hud-left">
+      <div class="stat-bar" data-stat="health">
+        <label>❤️ 生命</label>
+        <div class="bar-track"><div id="bar-health" class="bar-fill"></div></div>
+        <span id="val-health" class="val">100</span>
+      </div>
+      <div class="stat-bar" data-stat="hunger">
+        <label>🍖 饥饿</label>
+        <div class="bar-track"><div id="bar-hunger" class="bar-fill"></div></div>
+        <span id="val-hunger" class="val">100</span>
+      </div>
+      <div class="stat-bar" data-stat="thirst">
+        <label>💧 口渴</label>
+        <div class="bar-track"><div id="bar-thirst" class="bar-fill"></div></div>
+        <span id="val-thirst" class="val">100</span>
+      </div>
+      <div class="stat-bar" data-stat="stamina">
+        <label>⚡ 体力</label>
+        <div class="bar-track"><div id="bar-stamina" class="bar-fill stamina"></div></div>
+        <span id="val-stamina" class="val">100</span>
+      </div>
     </div>
-    <div class="hud-row">
-      <span id="h-day">📅 第 1 天</span>
-      <span id="h-time">☀️ 白天</span>
-      <span id="h-score">⭐ 0</span>
-      <a class="back" href="../">← 版本选择</a>
+
+    <div class="hud-right">
+      <div class="meta">
+        <span id="h-day">第 1 天</span>
+        <span id="h-time">☀️ 白天</span>
+        <span class="score">⭐ <b id="val-score">0</b></span>
+      </div>
+      <div class="day-cycle">
+        <div id="day-progress" class="day-fill"></div>
+      </div>
+      <a class="back" href="../">← 返回</a>
+    </div>
+  </header>
+
+  <div id="crosshair" aria-hidden="true"><span></span></div>
+  <div id="interact-prompt"></div>
+
+  <footer id="hud-bottom" class="hud hidden">
+    <div id="inventory-bar"></div>
+    <div id="hint">点击画面开始</div>
+  </footer>
+
+  <div id="toast"></div>
+
+  <div id="overlay-start" class="overlay show">
+    <div class="panel">
+      <h1>荒野生存 3D</h1>
+      <p class="lead">第三人称荒野生存 · 采集、狩猎、抵御黑夜</p>
+      <div class="controls-grid">
+        <div><kbd>W A S D</kbd><span>移动（相对视角）</span></div>
+        <div><kbd>Shift</kbd><span>奔跑（需移动中）</span></div>
+        <div><kbd>空格</kbd><span>跳跃</span></div>
+        <div><kbd>鼠标</kbd><span>转动视角</span></div>
+        <div><kbd>左键</kbd><span>攻击敌人 / 狩猎</span></div>
+        <div><kbd>E</kbd> / <kbd>F</kbd><span>采集资源 / 食用</span></div>
+        <div><kbd>Esc</kbd><span>暂停菜单</span></div>
+        <div><kbd>Tab</kbd><span>显示/隐藏背包栏</span></div>
+      </div>
+      <button id="btn-start" type="button">开始生存</button>
     </div>
   </div>
 
-  <div id="overlay-start" class="overlay show">
-    <h1>荒野生存 3D</h1>
-    <p>第三人称拟真荒野生存 · 持续开发中</p>
-    <ul>
-      <li><kbd>WASD</kbd> 移动 · <kbd>Shift</kbd> 奔跑</li>
-      <li>鼠标移动视角 · <kbd>左键</kbd> 攻击 · <kbd>E</kbd> 采集/食用</li>
-      <li><kbd>空格</kbd> 跳跃 · 夜晚怪物来袭</li>
-    </ul>
-    <button id="btn-start">进入荒野</button>
-    <p class="sub">进入后点击游戏画面锁定鼠标</p>
+  <div id="overlay-pause" class="overlay">
+    <div class="panel">
+      <h2>已暂停</h2>
+      <div class="setting">
+        <label>鼠标灵敏度 X <output id="sens-val-x"></output></label>
+        <input id="sens-x" type="range" min="0.001" max="0.006" step="0.0002" />
+      </div>
+      <div class="setting">
+        <label>鼠标灵敏度 Y <output id="sens-val-y"></output></label>
+        <input id="sens-y" type="range" min="0.001" max="0.006" step="0.0002" />
+      </div>
+      <div class="pause-actions">
+        <button id="btn-resume" type="button">继续游戏</button>
+        <button id="btn-pause-restart" type="button" class="secondary">重新开始</button>
+      </div>
+    </div>
   </div>
 
   <div id="overlay-dead" class="overlay">
-    <h2>生存失败</h2>
-    <p>存活 <span id="dead-day">0</span> 天 · 得分 <span id="dead-score">0</span></p>
-    <button id="btn-restart">重新开始</button>
+    <div class="panel">
+      <h2>生存失败</h2>
+      <p>你存活了 <strong id="dead-day">0</strong> 天，得分 <strong id="dead-score">0</strong></p>
+      <button id="btn-restart" type="button">再次挑战</button>
+      <a class="link-back" href="../">返回版本选择</a>
+    </div>
   </div>
-
-  <div id="hint">点击画面开始 · 按 Esc 释放鼠标</div>
-  <div id="toast"></div>
 
   <script type="importmap">
   {

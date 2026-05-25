@@ -170,17 +170,64 @@ export class World3D {
     return best;
   }
 
-  getAttackTarget(px, pz, range) {
+  _dist(px, pz, e) {
+    return Math.hypot(e.x - px, e.z - pz);
+  }
+
+  _wrapTarget(e, dist, kind) {
+    return { entity: e, type: e.type, def: e.def, hp: e.hp, maxHp: e.maxHp, dist, kind };
+  }
+
+  /** 攻击优先：敌对 > 可狩猎 > 资源 */
+  getAttackTarget(px, pz, range, isNight) {
+    let hostile = null;
+    let hostileD = range;
+    let passive = null;
+    let passiveD = range;
+
+    for (const e of this.entities) {
+      if (e.dead) continue;
+      const d = this._dist(px, pz, e);
+      if (d >= range) continue;
+
+      const c = CREATURES[e.type];
+      if (c?.hostile && !(c.nightOnly && !isNight)) {
+        if (d < hostileD) {
+          hostileD = d;
+          hostile = e;
+        }
+      } else if (e.passive && d < passiveD) {
+        passiveD = d;
+        passive = e;
+      }
+    }
+
+    if (hostile) return this._wrapTarget(hostile, hostileD, 'hostile');
+    if (passive) return this._wrapTarget(passive, passiveD, 'passive');
+    return null;
+  }
+
+  getInteractable(px, pz, range) {
     let best = null;
     let bestD = range;
     for (const e of this.entities) {
-      if (e.dead) continue;
-      const d = Math.hypot(e.x - px, e.z - pz);
+      if (e.dead || !RESOURCES[e.type]) continue;
+      const d = this._dist(px, pz, e);
       if (d < bestD) {
         bestD = d;
         best = e;
       }
     }
-    return best;
+    return best ? this._wrapTarget(best, bestD, 'resource') : null;
+  }
+
+  /** UI 用：最近可交互/可攻击目标 */
+  getFocusTarget(px, pz, interactRange, attackRange, isNight) {
+    const interact = this.getInteractable(px, pz, interactRange);
+    const attack = this.getAttackTarget(px, pz, attackRange, isNight);
+    if (attack && attack.dist < 3.2) return attack;
+    if (interact) return interact;
+    if (attack) return attack;
+    return null;
   }
 }
