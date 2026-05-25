@@ -1,8 +1,9 @@
 /** 统一输入：按键边缘检测、暂停、灵敏度 */
 export class GameInput {
-  constructor(canvas, onPauseToggle) {
+  constructor(canvas, onPauseToggle, onEscape) {
     this.canvas = canvas;
     this.onPauseToggle = onPauseToggle;
+    this.onEscape = onEscape;
     this.keys = new Set();
     this.keysJust = new Set();
     this.mouseLocked = false;
@@ -43,6 +44,7 @@ export class GameInput {
 
     if (e.code === 'Escape' && this.enabled) {
       e.preventDefault();
+      if (this.onEscape?.()) return;
       this.onPauseToggle?.();
     }
   }

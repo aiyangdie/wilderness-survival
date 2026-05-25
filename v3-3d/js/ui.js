@@ -150,12 +150,13 @@ export class GameUI {
 
   updateBars(player, sprinting) {
     const set = (key, v, max = 100) => {
-      const pct = Math.max(0, Math.min(100, (v / max) * 100));
+      const safe = Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : max;
+      const pct = Math.max(0, Math.min(100, (safe / max) * 100));
       if (this._barPct[key] !== pct) {
         this._barPct[key] = pct;
         this.els.bars[key].style.width = `${pct}%`;
       }
-      this.els.vals[key].textContent = Math.ceil(v);
+      this.els.vals[key].textContent = Math.ceil(safe);
       const wrap = this.els.bars[key].parentElement;
       wrap.classList.toggle('low', pct < 25);
       wrap.classList.toggle('critical', pct < 12);
@@ -233,23 +234,27 @@ export class GameUI {
     }
   }
 
-  showCraft(show, inventory, craftSys) {
+  showCraft(show, inventory, craftSys, ctx = {}) {
     this.els.craft?.classList.toggle('show', show);
-    if (show && craftSys) this.renderCraftList(inventory, craftSys);
+    if (show && craftSys) this.renderCraftList(inventory, craftSys, ctx);
   }
 
-  renderCraftList(inventory, craftSys) {
+  renderCraftList(inventory, craftSys, ctx = {}) {
     const list = this.els.craftList;
     if (!list) return;
     list.innerHTML = '';
     for (const { id, name, icon, costs, desc, category, build } of craftSys.getRecipeList()) {
-      const can = craftSys.canCraft(id, inventory);
+      const can = craftSys.canCraft(id, inventory, ctx);
+      const costMap =
+        id === 'cooked_meat' && craftSys._recipeCosts
+          ? craftSys._recipeCosts(id, ctx)
+          : costs;
+      const costStr = Object.entries(costMap || costs)
+        .map(([k, v]) => `${ITEMS[k]?.icon || k}×${v}`)
+        .join(' ');
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = `craft-item${can ? '' : ' disabled'}`;
-      const costStr = Object.entries(costs)
-        .map(([k, v]) => `${ITEMS[k]?.icon || k}×${v}`)
-        .join(' ');
       btn.innerHTML = `
         <span class="ci-icon">${icon}</span>
         <span class="ci-body">
@@ -427,13 +432,15 @@ export class GameUI {
 
   getTargetPrompt(target, inventory, ctx = {}) {
     if (!target) {
-      if (ctx.nearShelter) return { text: '[E] 在棚屋休息（回血回体）', mode: 'item', hpRatio: null };
+      if (ctx.nearShelter) return { text: '[按住 E] 在棚屋休息', mode: 'item', hpRatio: null };
       if (ctx.nearCampfire && (inventory.meat || 0) > 0) {
         return { text: '[C] 篝火烤肉（仅消耗生肉）', mode: 'item', hpRatio: null };
       }
       if ((inventory.cooked_meat || 0) > 0) return { text: '[E] 食用熟肉', mode: 'item', hpRatio: null };
       if ((inventory.meat || 0) > 0) return { text: '[E] 食用生肉 / [C] 烤肉', mode: 'item', hpRatio: null };
-      if ((inventory.fiber || 0) > 0) return { text: '[E] 嚼纤维充饥', mode: 'neutral', hpRatio: null };
+      if ((inventory.fiber || 0) > 0 && (ctx.hunger ?? 100) < 70) {
+        return { text: '[E] 嚼纤维充饥', mode: 'neutral', hpRatio: null };
+      }
       return null;
     }
     if (target.kind === 'catch') {
@@ -445,7 +452,9 @@ export class GameUI {
       const name = ENTITY_LABELS[target.type] || target.type;
       const ratio = 1 - target.hp / target.maxHp;
       if (target.type === 'bush') {
-        return { text: `[E] ${verb}${name} / 饮水`, mode: 'resource', hpRatio: ratio };
+        const drink =
+          (ctx.thirst ?? 100) < 95 ? ' / 饮水' : '';
+        return { text: `[E] ${verb}${name}${drink}`, mode: 'resource', hpRatio: ratio };
       }
       return { text: `[E] ${verb}${name}`, mode: 'resource', hpRatio: ratio };
     }

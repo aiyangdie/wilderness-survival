@@ -505,7 +505,7 @@ export class World3D {
     if (catchT) return this._wrapTarget(catchT, catchD, 'catch');
     if (hostile) {
       const ht = this._wrapTarget(hostile, hostileD, 'hostile');
-      if (hostileD < 3.2) return ht;
+      if (hostileD < 3.2 || hostileD < attackRange * 0.9) return ht;
       if (interact) return this._wrapTarget(interact, interactD, 'resource');
       return ht;
     }

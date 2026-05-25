@@ -6,7 +6,7 @@ export const SURVIVAL_GUIDE = [
   { title: '饥饿 🍖', lines: ['狩猎 → 生肉', '篝火旁按 C 或 B 制作烤肉', 'E 食用熟肉回饱食+生命', '生肉可吃但有风险'] },
   { title: '生命 ❤️', lines: ['熟肉、棚屋休息回血', '皮甲减伤', '饥饿/口渴过低会扣血'] },
   { title: '体力 ⚡', lines: ['Shift 奔跑消耗', '停止移动快速恢复', '体力过低无法冲刺'] },
-  { title: '建造 🏠', lines: ['B 打开制作', '选篝火/木墙/棚屋等 → 左键放置', 'R 旋转 · Esc 取消（退还材料）', '棚屋内 E 休息', '篝火旁可烤肉'] },
+  { title: '建造 🏠', lines: ['B 打开制作', '选篝火/木墙/棚屋等 → 左键放置', 'R 旋转 · Esc 取消（退还材料）', '棚屋内按住 E 休息', '篝火旁可烤肉'] },
   { title: '成长路线', lines: ['砍树采石 → 石斧', '猎鹿兔 → 肉 → 篝火', '木板绳索 → 棚屋+围墙', '夜晚躲棚屋、用墙挡怪'] },
 ];
 
@@ -20,13 +20,21 @@ export function getStatusHint(player, inventory, ctx) {
     else if ((inventory.meat || 0) > 0) lines.push('饥饿：先做篝火再烤肉');
     else lines.push('饥饿：狩猎动物获取生肉');
   } else if (p.health < 40) {
-    if (ctx.nearShelter) lines.push('生命：在棚屋旁按 E 休息');
+    if (ctx.nearShelter) lines.push('生命：在棚屋旁按住 E 休息');
     else if ((inventory.cooked_meat || 0) > 0) lines.push('生命：按 E 吃熟肉');
     else lines.push('生命：建造棚屋或吃熟肉');
   } else if (p.stamina < 25) lines.push('体力不足：停止奔跑恢复');
-  else if (ctx.nearShelter) lines.push('棚屋：按 E 休息恢复');
+  else if (ctx.nearShelter) lines.push('棚屋：按住 E 休息恢复');
   else if (ctx.nearCampfire) lines.push('篝火：按 C 烤肉（需生肉）');
-  else if (!ctx.hasCampfire && (inventory.wood || 0) >= 5) lines.push('建议：B 制作篝火');
+  else if (
+    !ctx.hasCampfire &&
+    (inventory.wood || 0) >= (RECIPES.campfire?.costs?.wood || 5) &&
+    (inventory.stone || 0) >= (RECIPES.campfire?.costs?.stone || 2)
+  ) {
+    lines.push('建议：B 制作篝火（需木材+石头）');
+  } else if (!ctx.hasCampfire && (inventory.wood || 0) >= 3) {
+    lines.push('建议：开采岩石获取石头，再建篝火');
+  }
   return lines[0] || '采集资源 · 狩猎 · B 制作 · 建造基地';
 }
 
