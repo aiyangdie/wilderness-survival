@@ -26,6 +26,7 @@ export class Game3D {
     this.hudTimer = 0;
     this.isAttacking = false;
     this.attackAnimTimer = 0;
+    this._attackPulse = false;
     this.coyoteTimer = 0;
     this.invShow = true;
     this.prevHealth = 100;
@@ -291,7 +292,10 @@ export class Game3D {
     if (this.interactCooldown > 0) this.interactCooldown -= dt;
     if (this.attackAnimTimer > 0) {
       this.attackAnimTimer -= dt;
-      if (this.attackAnimTimer <= 0) this.isAttacking = false;
+      if (this.attackAnimTimer <= 0) {
+        this.isAttacking = false;
+        this._attackPulse = false;
+      }
     }
     if (p.onGround) this.coyoteTimer = CFG.player.coyoteTime;
     else this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
@@ -372,7 +376,8 @@ export class Game3D {
     }
 
     this.human.setPosition(p.x, p.y, p.z);
-    this.human.update(dt, moving ? speed : 0, p.onGround, this.isAttacking, this.equipment);
+    this.human.update(dt, moving ? speed : 0, p.onGround, this._attackPulse, this.equipment);
+    if (this._attackPulse) this._attackPulse = false;
     return run && moving;
   }
 
@@ -476,7 +481,9 @@ export class Game3D {
 
     p.attackCd = CFG.player.attackCooldown;
     this.isAttacking = true;
-    this.attackAnimTimer = 0.32;
+    this._attackPulse = true;
+    this.attackAnimTimer = 0.45;
+    this.human._attackStarted = false;
 
     const e = target.entity;
     const dmg = CFG.player.attackDamage + stats.attackBonus;
