@@ -1,22 +1,53 @@
 import * as THREE from 'three';
 
-/** 轻量粒子与场景特效 */
+const POOL_SIZE = 48;
+const sharedGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+const matCache = new Map();
+
+function getMat(color) {
+  if (!matCache.has(color)) {
+    matCache.set(
+      color,
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false })
+    );
+  }
+  return matCache.get(color);
+}
+
+/** 对象池粒子 — 零运行时 Geometry/Material 分配 */
 export class VfxManager {
   constructor(scene) {
     this.scene = scene;
-    this.particles = [];
+    this.pool = [];
+    this.activeCount = 0;
+
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const mesh = new THREE.Mesh(sharedGeo, getMat(0xffffff));
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      this.pool.push({
+        mesh,
+        vel: new THREE.Vector3(),
+        life: 0,
+        age: 0,
+        active: false,
+      });
+    }
+
     this.focusRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.7, 1.05, 32),
+      new THREE.RingGeometry(0.7, 1.05, 16),
       new THREE.MeshBasicMaterial({
         color: 0x3ecf8e,
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.5,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
     );
     this.focusRing.rotation.x = -Math.PI / 2;
     this.focusRing.visible = false;
+    this.focusRing.frustumCulled = false;
     scene.add(this.focusRing);
 
     this.slash = new THREE.Mesh(
@@ -30,45 +61,49 @@ export class VfxManager {
       })
     );
     this.slash.visible = false;
+    this.slash.frustumCulled = false;
     scene.add(this.slash);
     this.slashTimer = 0;
+    this._pulseT = 0;
   }
 
-  burst(x, y, z, color = 0xffaa44, count = 10) {
-    for (let i = 0; i < count; i++) {
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.12, 0.12, 0.12),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 })
+  _emit(x, y, z, color, count, spread, upSpeed, life) {
+    let spawned = 0;
+    for (const p of this.pool) {
+      if (p.active) continue;
+      p.active = true;
+      p.age = 0;
+      p.life = life + Math.random() * 0.15;
+      p.mesh.material = getMat(color);
+      p.mesh.visible = true;
+      p.mesh.position.set(
+        x + (Math.random() - 0.5) * spread,
+        y + 0.8 + Math.random() * 0.4,
+        z + (Math.random() - 0.5) * spread
       );
-      mesh.position.set(x, y + 1, z);
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 4,
-        Math.random() * 3 + 1,
-        (Math.random() - 0.5) * 4
+      p.vel.set(
+        (Math.random() - 0.5) * spread * 2,
+        upSpeed + Math.random(),
+        (Math.random() - 0.5) * spread * 2
       );
-      this.scene.add(mesh);
-      this.particles.push({ mesh, vel, life: 0.35 + Math.random() * 0.2, age: 0 });
+      spawned += 1;
+      if (spawned >= count) break;
     }
+  }
+
+  burst(x, y, z, color = 0xffaa44, count = 5) {
+    this._emit(x, y, z, color, count, 0.8, 2.5, 0.35);
   }
 
   dust(x, y, z) {
-    for (let i = 0; i < 3; i++) {
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.08, 0.04, 0.08),
-        new THREE.MeshBasicMaterial({ color: 0x8b7355, transparent: true, opacity: 0.5 })
-      );
-      mesh.position.set(x + (Math.random() - 0.5) * 0.3, y + 0.1, z + (Math.random() - 0.5) * 0.3);
-      const vel = new THREE.Vector3((Math.random() - 0.5) * 0.5, 0.4, (Math.random() - 0.5) * 0.5);
-      this.scene.add(mesh);
-      this.particles.push({ mesh, vel, life: 0.25, age: 0 });
-    }
+    this._emit(x, y, z, 0x8b7355, 2, 0.25, 0.5, 0.22);
   }
 
   slash(x, y, z, yaw) {
     this.slash.position.set(x, y + 1.2, z);
     this.slash.rotation.set(-Math.PI / 2, 0, yaw - 0.4);
     this.slash.visible = true;
-    this.slashTimer = 0.12;
+    this.slashTimer = 0.1;
   }
 
   setFocus(x, y, z, mode = 'neutral', visible) {
@@ -76,43 +111,40 @@ export class VfxManager {
       this.focusRing.visible = false;
       return;
     }
-    const colors = { danger: 0xe85d5d, resource: 0x3ecf8e, neutral: 0xf0b429, item: 0x48cae4 };
+    const colors = { danger: 0xe85d5d, resource: 0x3ecf8e, neutral: 0xf0b429, item: 0x48cae4, catch: 0xf0b429 };
     this.focusRing.material.color.setHex(colors[mode] || colors.neutral);
-    this.focusRing.position.set(x, y + 0.15, z);
+    this.focusRing.position.set(x, y + 0.12, z);
     this.focusRing.visible = true;
-    this.focusRing.material.opacity = 0.45 + Math.sin(performance.now() * 0.008) * 0.2;
+    this._pulseT += 0.06;
+    this.focusRing.material.opacity = 0.42 + Math.sin(this._pulseT) * 0.15;
   }
 
   update(dt) {
     if (this.slashTimer > 0) {
       this.slashTimer -= dt;
-      this.slash.material.opacity = Math.max(0, this.slashTimer / 0.12);
+      this.slash.material.opacity = Math.max(0, this.slashTimer / 0.1) * 0.85;
       if (this.slashTimer <= 0) this.slash.visible = false;
     }
 
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
+    for (const p of this.pool) {
+      if (!p.active) continue;
       p.age += dt;
+      if (p.age >= p.life) {
+        p.active = false;
+        p.mesh.visible = false;
+        continue;
+      }
       p.vel.y -= 9 * dt;
       p.mesh.position.addScaledVector(p.vel, dt);
-      p.mesh.material.opacity = 1 - p.age / p.life;
-      p.mesh.rotation.y += dt * 4;
-      if (p.age >= p.life) {
-        this.scene.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        p.mesh.material.dispose();
-        this.particles.splice(i, 1);
-      }
+      p.mesh.material.opacity = (1 - p.age / p.life) * 0.9;
     }
   }
 
   clear() {
-    this.particles.forEach((p) => {
-      this.scene.remove(p.mesh);
-      p.mesh.geometry.dispose();
-      p.mesh.material.dispose();
-    });
-    this.particles = [];
+    for (const p of this.pool) {
+      p.active = false;
+      p.mesh.visible = false;
+    }
     this.focusRing.visible = false;
     this.slash.visible = false;
   }

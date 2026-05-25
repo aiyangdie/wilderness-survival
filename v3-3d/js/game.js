@@ -31,6 +31,13 @@ export class Game3D {
     this.duskWarned = false;
     this.footstepTimer = 0;
     this.camShake = 0;
+    this.accumulator = 0;
+    this.uiFastTimer = 0;
+    this.uiSlowTimer = 0;
+    this.focusTarget = null;
+    this._lastLitPhase = '';
+    this._fpsAccum = 0;
+    this._fpsFrames = 0;
 
     this.yaw = 0;
     this.pitch = 0.25;
@@ -69,23 +76,15 @@ export class Game3D {
     this.scene.fog = new THREE.Fog(0x87ceeb, 50, 140);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.2, 250);
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+    this.renderer.shadowMap.enabled = false;
     document.body.appendChild(this.renderer.domElement);
     this.canvas = this.renderer.domElement;
 
     this.sun = new THREE.DirectionalLight(0xfff5e6, 1.1);
     this.sun.position.set(40, 55, 30);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(1024, 1024);
-    this.sun.shadow.bias = -0.0002;
-    const sc = this.sun.shadow.camera;
-    sc.near = 1;
-    sc.far = 120;
-    sc.left = sc.bottom = -45;
-    sc.right = sc.top = 45;
+    this.sun.castShadow = false;
     this.sun.target = new THREE.Object3D();
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
@@ -159,10 +158,29 @@ export class Game3D {
 
   _loop() {
     if (!this.running) return;
-    const dt = Math.min(this.clock.getDelta(), 1 / 30);
-    if (!this.paused) this._update(dt);
-    else this.ui.updateFloats(dt);
-    this.vfx?.update(dt);
+    const rawDt = Math.min(this.clock.getDelta(), 0.1);
+    this._fpsAccum += rawDt;
+    this._fpsFrames += 1;
+    if (this._fpsAccum >= 0.5) {
+      this.ui.setFps(this._fpsFrames / this._fpsAccum);
+      this._fpsAccum = 0;
+      this._fpsFrames = 0;
+    }
+
+    if (!this.paused) {
+      this.accumulator += rawDt;
+      const step = CFG.fixedDt;
+      const maxSteps = CFG.maxCatchUp;
+      let steps = 0;
+      while (this.accumulator >= step && steps < maxSteps) {
+        this._update(step);
+        this.accumulator -= step;
+        steps += 1;
+      }
+      this.vfx?.update(rawDt);
+      this.ui.updateFloats(rawDt);
+    }
+
     this._render();
     this.input.endFrame();
     this.rafId = requestAnimationFrame(() => this._loop());
@@ -186,7 +204,10 @@ export class Game3D {
     this._updateTime(dt);
     const sprinting = this._updatePlayer(dt);
     this._updateEntities(dt);
-    this._updateLighting();
+    if (this.phase !== this._lastLitPhase) {
+      this._updateLighting();
+      this._lastLitPhase = this.phase;
+    }
 
     p.hunger = Math.max(0, p.hunger - CFG.decay.hunger * dt);
     p.thirst = Math.max(0, p.thirst - CFG.decay.thirst * dt);
@@ -215,11 +236,15 @@ export class Game3D {
 
     if (p.health <= 0) this._gameOver();
 
-    this.ui.updateFloats(dt);
-    this.hudTimer += dt;
-    if (this.hudTimer >= 0.06) {
-      this.hudTimer = 0;
-      this._refreshUI(sprinting);
+    this.uiFastTimer += dt;
+    this.uiSlowTimer += dt;
+    if (this.uiFastTimer >= CFG.ui.barsInterval) {
+      this.uiFastTimer = 0;
+      this._refreshUIFast(sprinting);
+    }
+    if (this.uiSlowTimer >= CFG.ui.labelsInterval) {
+      this.uiSlowTimer = 0;
+      this._refreshUISlow();
     }
   }
 
@@ -276,11 +301,10 @@ export class Game3D {
     if (p.onGround && !this.wasOnGround) this.human.triggerLand();
     this.wasOnGround = p.onGround;
 
-    if (moving && p.onGround) {
+    if (moving && p.onGround && run) {
       this.footstepTimer -= dt;
       if (this.footstepTimer <= 0) {
-        this.vfx.dust(p.x, p.y, p.z);
-        this.footstepTimer = run ? 0.28 : 0.42;
+        this.footstepTimer = 0.55;
       }
     }
 
@@ -307,6 +331,9 @@ export class Game3D {
       const dist = Math.hypot(dx, dz);
       if (dist > CFG.entityCullDist) continue;
 
+      const aiDist = CFG.entityAiDist;
+      if (dist > aiDist) continue;
+
       const def = e.def;
       if (e.passive && dist > 0.5 && dist < 14) {
         e.x -= (dx / dist) * def.speed * dt;
@@ -322,7 +349,12 @@ export class Game3D {
         }
       }
 
-      e.y = this.world.getHeightAt(e.x, e.z);
+      const moved = Math.abs(e.x - e._lastX) > 0.08 || Math.abs(e.z - e._lastZ) > 0.08;
+      if (moved || dist < 16) {
+        e.y = this.world.getHeightAt(e.x, e.z);
+        e._lastX = e.x;
+        e._lastZ = e.z;
+      }
       e.mesh.position.set(e.x, e.y, e.z);
       if ((e.passive || CREATURES[e.type]) && dist > 0.5) {
         e.mesh.rotation.y = Math.atan2(dx, dz);
@@ -353,7 +385,7 @@ export class Game3D {
     e.hp -= dmg;
 
     const col = e.def?.hostile ? 0xff4444 : 0xffcc66;
-    this.vfx.burst(e.x, e.y, e.z, col, 8);
+    this.vfx.burst(e.x, e.y, e.z, col, 5);
     this.vfx.slash(p.x, p.y, p.z, this.human.group.rotation.y);
     this.ui.floatDamage(
       e.x, e.y, e.z, dmg, this.camera, this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight
@@ -373,9 +405,10 @@ export class Game3D {
       p.x, p.z, CFG.player.catchRange, CFG.player.catchHpRatio
     );
     if (catchT) {
+      const { x, y, z } = catchT.entity;
       this._killEntity(catchT.entity, true);
       this.interactCooldown = 0.5;
-      this.vfx.burst(catchT.entity.x, catchT.entity.y, catchT.entity.z, 0xa8dadc, 6);
+      this.vfx.burst(x, y, z, 0xa8dadc, 4);
       this.ui.toast(`捕获了 ${ENTITY_LABELS[catchT.type] || catchT.type}`, 'success');
       p.score += 18;
       return;
@@ -394,7 +427,7 @@ export class Game3D {
       this.interactCooldown = 0.3;
       const e = target.entity;
       e.hp -= CFG.player.interactDamage;
-      this.vfx.burst(e.x, e.y, e.z, 0x8fbc8f, 4);
+      this.vfx.burst(e.x, e.y, e.z, 0x8fbc8f, 3);
       if (e.hp <= 0) {
         this._killEntity(e, true);
         this.ui.toast(`${target.def?.verb || '采集'}${ENTITY_LABELS[e.type] || e.type} 完成`, 'success');
@@ -405,6 +438,7 @@ export class Game3D {
     if ((this.inventory.cooked_meat || 0) > 0) {
       this.interactCooldown = 0.55;
       this.inventory.cooked_meat--;
+      this.ui.markInventoryDirty();
       p.hunger = Math.min(100, p.hunger + 42);
       p.health = Math.min(100, p.health + 12);
       this.ui.toast('食用熟肉', 'success');
@@ -414,6 +448,7 @@ export class Game3D {
     if ((this.inventory.meat || 0) > 0) {
       this.interactCooldown = 0.55;
       this.inventory.meat--;
+      this.ui.markInventoryDirty();
       p.hunger = Math.min(100, p.hunger + 22);
       p.health = Math.max(0, p.health - 4);
       this.ui.toast('食用生肉（建议按 C 烤肉）', 'warn');
@@ -433,6 +468,7 @@ export class Game3D {
     inv.meat -= need.meat;
     inv.wood -= need.wood;
     inv.cooked_meat = (inv.cooked_meat || 0) + 1;
+    this.ui.markInventoryDirty();
     this.ui.toast('🍖 烤肉完成（按 E 食用）', 'success');
     this.player.score += 5;
   }
@@ -448,6 +484,7 @@ export class Game3D {
     const drops = e.def?.drop || {};
     for (const [k, v] of Object.entries(drops)) {
       this.inventory[k] = (this.inventory[k] || 0) + v;
+      this.ui.markInventoryDirty();
       if (harvest) {
         this.ui.floatPickup(
           k, v, e.x, e.y, e.z, this.camera,
@@ -463,24 +500,21 @@ export class Game3D {
     }
   }
 
-  _refreshUI(sprinting) {
+  _refreshUIFast(sprinting) {
     const p = this.player;
     this.ui.updateBars(p, sprinting);
     this.ui.updateMeta(this.day, PHASE_LABELS[this.phase] || '', this.time, p.score, this.phase);
-    this.ui.updateInventory(this.inventory);
-    this.ui.updateCompass(this.yaw);
     this.ui.updateSpawnShield(this.spawnInvuln);
     this.ui.setPointerHint(this.input.mouseLocked, this.paused);
 
-    const focus = this.world.getFocusTarget(
+    this.focusTarget = this.world.getFocusTarget(
       p.x, p.z, CFG.player.interactRange, CFG.player.attackRange, this.phase === 'night'
     );
-
+    const focus = this.focusTarget;
     const prompt = this.ui.getTargetPrompt(focus, this.inventory);
     if (prompt && this.input.mouseLocked) {
       this.ui.setInteractPrompt(prompt.text, prompt.mode, prompt.hpRatio);
-      const chMode = prompt.mode === 'danger' ? 'danger' : prompt.mode;
-      this.ui.setCrosshairMode(chMode, this.isAttacking);
+      this.ui.setCrosshairMode(prompt.mode === 'danger' ? 'danger' : prompt.mode, this.isAttacking);
     } else {
       this.ui.clearInteractPrompt();
       this.ui.setCrosshairMode('neutral', this.isAttacking);
@@ -492,14 +526,28 @@ export class Game3D {
     } else {
       this.vfx.setFocus(0, 0, 0, 'neutral', false);
     }
+  }
 
+  _refreshUISlow() {
+    const p = this.player;
+    this.ui.updateInventory(this.inventory);
+    this.ui.updateCompass(this.yaw);
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
     this.ui.updateWorldLabels(
       this.world.entities,
-      focus,
+      this.focusTarget,
       this.camera,
-      this.renderer.domElement.clientWidth,
-      this.renderer.domElement.clientHeight
+      w,
+      h,
+      p.x,
+      p.z
     );
+  }
+
+  _refreshUI(sprinting) {
+    this._refreshUIFast(sprinting);
+    this._refreshUISlow();
   }
 
   _updateTime(dt) {

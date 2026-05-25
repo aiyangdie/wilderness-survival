@@ -1,8 +1,10 @@
+import * as THREE from 'three';
 import { ITEMS, ENTITY_LABELS, RESOURCES } from './config.js';
 
-const _proj = { x: 0, y: 0 };
+const FLOAT_POOL = 10;
+const LABEL_MAX = 4;
 
-/** HUD、世界标签、浮动文字、指南针 */
+/** HUD — 分层刷新、DOM 池化，减少卡顿 */
 export class GameUI {
   constructor() {
     this.els = {
@@ -36,6 +38,7 @@ export class GameUI {
       floatLayer: document.getElementById('float-layer'),
       compass: document.getElementById('compass-arrow'),
       spawnShield: document.getElementById('spawn-shield'),
+      fps: document.getElementById('fps-counter'),
       start: document.getElementById('overlay-start'),
       dead: document.getElementById('overlay-dead'),
       pause: document.getElementById('overlay-pause'),
@@ -44,9 +47,35 @@ export class GameUI {
       sensValX: document.getElementById('sens-val-x'),
       sensValY: document.getElementById('sens-val-y'),
     };
+
     this._labelPool = [];
-    this._floats = [];
-    this._vec = { x: 0, y: 0, z: 0 };
+    this._floatPool = [];
+    this._floatActive = [];
+    this._projVec = new THREE.Vector3();
+    this._invHash = '';
+    this._lastPrompt = '';
+    this._invDirty = true;
+
+    for (let i = 0; i < LABEL_MAX; i++) {
+      const d = document.createElement('div');
+      d.className = 'world-label';
+      d.innerHTML = '<span class="wl-name"></span><div class="wl-bar"><div class="wl-fill"></div></div>';
+      d.style.display = 'none';
+      this.els.worldLabels.appendChild(d);
+      this._labelPool.push(d);
+    }
+
+    for (let i = 0; i < FLOAT_POOL; i++) {
+      const el = document.createElement('div');
+      el.className = 'float-text';
+      el.style.display = 'none';
+      this.els.floatLayer.appendChild(el);
+      this._floatPool.push({ el, active: false, vy: 0, age: 0, max: 0.9 });
+    }
+  }
+
+  markInventoryDirty() {
+    this._invDirty = true;
   }
 
   showStart(show) {
@@ -63,6 +92,12 @@ export class GameUI {
 
   showPause(show) {
     this.els.pause.classList.toggle('show', show);
+  }
+
+  setFps(fps) {
+    if (!this.els.fps) return;
+    this.els.fps.textContent = `${Math.round(fps)} FPS`;
+    this.els.fps.classList.toggle('low', fps < 45);
   }
 
   setPointerHint(locked, paused) {
@@ -91,7 +126,6 @@ export class GameUI {
     set('hunger', player.hunger);
     set('thirst', player.thirst);
     set('stamina', player.stamina);
-
     this.els.staminaWrap?.classList.toggle('dim', player.stamina > 92 && !sprinting);
     this.els.lowVignette?.classList.toggle('active', player.health < 28 && player.alive);
   }
@@ -106,28 +140,28 @@ export class GameUI {
 
   updateCompass(yaw) {
     if (!this.els.compass) return;
-    const deg = (yaw * 180) / Math.PI;
-    this.els.compass.style.transform = `rotate(${deg}deg)`;
+    this.els.compass.style.transform = `rotate(${(yaw * 180) / Math.PI}deg)`;
   }
 
   updateSpawnShield(secondsLeft) {
     const el = this.els.spawnShield;
     if (!el) return;
-    if (secondsLeft > 0) {
-      el.classList.add('show');
-      el.textContent = `🛡️ 保护 ${secondsLeft.toFixed(1)}s`;
-    } else {
-      el.classList.remove('show');
-    }
+    const show = secondsLeft > 0;
+    el.classList.toggle('show', show);
+    if (show) el.textContent = `🛡️ 保护 ${secondsLeft.toFixed(1)}s`;
   }
 
   updateInventory(inventory) {
+    const hash = JSON.stringify(inventory);
+    if (!this._invDirty && hash === this._invHash) return;
+    this._invHash = hash;
+    this._invDirty = false;
+
     const el = this.els.inventory;
     el.innerHTML = '';
     const order = ['wood', 'stone', 'fiber', 'meat', 'cooked_meat'];
-    const keys = [...new Set([...order, ...Object.keys(inventory)])];
     let any = false;
-    for (const id of keys) {
+    for (const id of order) {
       const count = inventory[id];
       if (!count || count <= 0) continue;
       any = true;
@@ -142,6 +176,10 @@ export class GameUI {
   }
 
   setInteractPrompt(text, mode = 'neutral', hpRatio = null) {
+    const key = `${text}|${mode}|${hpRatio}`;
+    if (key === this._lastPrompt) return;
+    this._lastPrompt = key;
+
     const el = this.els.interact;
     const prog = this.els.interactProgress;
     const wrap = this.els.interactProgressWrap;
@@ -157,7 +195,9 @@ export class GameUI {
   }
 
   clearInteractPrompt() {
-    this.setInteractPrompt(null);
+    this._lastPrompt = '';
+    this.els.interact.classList.remove('show', 'mode-danger', 'mode-resource', 'mode-item', 'mode-neutral', 'mode-catch');
+    this.els.interactProgressWrap?.classList.remove('visible');
   }
 
   setCrosshairMode(mode, attacking = false) {
@@ -192,74 +232,73 @@ export class GameUI {
   _spawnFloat(text, x, y, z, camera, width, height, kind) {
     const pos = this._project(x, y, z, camera, width, height);
     if (!pos) return;
-    const el = document.createElement('div');
-    el.className = `float-text ${kind}`;
-    el.textContent = text;
-    el.style.left = `${pos.x}px`;
-    el.style.top = `${pos.y}px`;
-    this.els.floatLayer.appendChild(el);
-    const life = { el, vy: -40, age: 0, max: 0.9 };
-    this._floats.push(life);
+    const slot = this._floatPool.find((f) => !f.active);
+    if (!slot) return;
+    slot.active = true;
+    slot.age = 0;
+    slot.vy = -40;
+    slot.el.className = `float-text ${kind}`;
+    slot.el.textContent = text;
+    slot.el.style.display = 'block';
+    slot.el.style.left = `${pos.x}px`;
+    slot.el.style.top = `${pos.y}px`;
+    slot.el.style.opacity = '1';
+    this._floatActive.push(slot);
   }
 
   _project(x, y, z, camera, width, height) {
-    this._vec.x = x;
-    this._vec.y = y;
-    this._vec.z = z;
-    const v = this._vec;
-    v.project(camera);
-    if (v.z > 1) return null;
+    this._projVec.set(x, y, z).project(camera);
+    if (this._projVec.z > 1) return null;
     return {
-      x: (v.x * 0.5 + 0.5) * width,
-      y: (-v.y * 0.5 + 0.5) * height,
+      x: (this._projVec.x * 0.5 + 0.5) * width,
+      y: (-this._projVec.y * 0.5 + 0.5) * height,
     };
   }
 
   updateFloats(dt) {
-    for (let i = this._floats.length - 1; i >= 0; i--) {
-      const f = this._floats[i];
+    for (let i = this._floatActive.length - 1; i >= 0; i--) {
+      const f = this._floatActive[i];
       f.age += dt;
       f.vy -= 20 * dt;
       const top = parseFloat(f.el.style.top) + f.vy * dt;
       f.el.style.top = `${top}px`;
-      f.el.style.opacity = String(1 - f.age / f.max);
+      f.el.style.opacity = String(Math.max(0, 1 - f.age / f.max));
       if (f.age >= f.max) {
-        f.el.remove();
-        this._floats.splice(i, 1);
+        f.active = false;
+        f.el.style.display = 'none';
+        this._floatActive.splice(i, 1);
       }
     }
   }
 
-  updateWorldLabels(entities, focus, camera, width, height, maxDist = 22) {
-    const container = this.els.worldLabels;
+  updateWorldLabels(entities, focus, camera, width, height, playerX, playerZ) {
     const need = [];
+    const add = (e, priority) => {
+      if (need.length >= LABEL_MAX) return;
+      const pos = this._project(e.x, e.y + 2, e.z, camera, width, height);
+      if (!pos) return;
+      need.push({ e, pos, pct: e.hp / e.maxHp, priority });
+    };
+
+    if (focus?.entity && !focus.entity.dead) add(focus.entity, 0);
 
     for (const e of entities) {
-      if (e.dead) continue;
-      const dx = e.x - camera.position.x;
-      const dz = e.z - camera.position.z;
-      if (Math.hypot(dx, dz) > maxDist) continue;
-      const isHostile = !!e.def?.hostile;
-      if (e.hp >= e.maxHp - 0.5 && !isHostile) continue;
-      if (!RESOURCES[e.type] && !e.passive && !isHostile) continue;
-
-      const pos = this._project(e.x, e.y + 2.2, e.z, camera, width, height);
-      if (!pos) continue;
-      need.push({ e, pos, pct: e.hp / e.maxHp });
+      if (e.dead || e === focus?.entity) continue;
+      const dist = Math.hypot(e.x - playerX, e.z - playerZ);
+      if (dist > 18) continue;
+      const hostile = !!e.def?.hostile;
+      if (!hostile && e.hp >= e.maxHp - 0.5) continue;
+      if (!hostile && !e.passive && !RESOURCES[e.type]) continue;
+      add(e, hostile ? 1 : 2);
     }
 
-    while (this._labelPool.length < need.length) {
-      const d = document.createElement('div');
-      d.className = 'world-label';
-      d.innerHTML = '<span class="wl-name"></span><div class="wl-bar"><div class="wl-fill"></div></div>';
-      container.appendChild(d);
-      this._labelPool.push(d);
-    }
+    need.sort((a, b) => a.priority - b.priority);
 
-    this._labelPool.forEach((d, i) => {
+    for (let i = 0; i < this._labelPool.length; i++) {
+      const d = this._labelPool[i];
       if (i >= need.length) {
         d.style.display = 'none';
-        return;
+        continue;
       }
       const { e, pos, pct } = need[i];
       d.style.display = 'block';
@@ -269,7 +308,7 @@ export class GameUI {
       d.querySelector('.wl-fill').style.width = `${pct * 100}%`;
       d.classList.toggle('hostile', !!e.def?.hostile);
       d.classList.toggle('focus', focus?.entity === e);
-    });
+    }
   }
 
   bindPauseControls(input, onResume) {
@@ -306,18 +345,11 @@ export class GameUI {
     if (target.kind === 'resource') {
       const verb = target.def?.verb || '采集';
       const name = ENTITY_LABELS[target.type] || target.type;
+      const ratio = 1 - target.hp / target.maxHp;
       if (target.type === 'bush') {
-        return {
-          text: `[E] ${verb}${name} / 饮水`,
-          mode: 'resource',
-          hpRatio: 1 - target.hp / target.maxHp,
-        };
+        return { text: `[E] ${verb}${name} / 饮水`, mode: 'resource', hpRatio: ratio };
       }
-      return {
-        text: `[E] ${verb}${name}`,
-        mode: 'resource',
-        hpRatio: 1 - target.hp / target.maxHp,
-      };
+      return { text: `[E] ${verb}${name}`, mode: 'resource', hpRatio: ratio };
     }
     if (target.kind === 'hostile') {
       return {

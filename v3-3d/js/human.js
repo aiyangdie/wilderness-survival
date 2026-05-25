@@ -9,17 +9,17 @@ export class HumanCharacter {
     this.idlePhase = Math.random() * Math.PI * 2;
     this.landSquash = 0;
 
-    const skin = new THREE.MeshStandardMaterial({ color: 0xe8b4a0, roughness: 0.65 });
-    const shirt = new THREE.MeshStandardMaterial({ color: 0x3d5a80, roughness: 0.7 });
-    const pants = new THREE.MeshStandardMaterial({ color: 0x2b2d42, roughness: 0.75 });
-    const hair = new THREE.MeshStandardMaterial({ color: 0x3d2314, roughness: 0.8 });
+    const skin = new THREE.MeshLambertMaterial({ color: 0xe8b4a0 });
+    const shirt = new THREE.MeshLambertMaterial({ color: 0x3d5a80 });
+    const pants = new THREE.MeshLambertMaterial({ color: 0x2b2d42 });
+    const hair = new THREE.MeshLambertMaterial({ color: 0x3d2314 });
 
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.28), shirt);
     torso.position.y = 1.15;
     this.group.add(torso);
     this.meshParts.torso = torso;
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 12), skin);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), skin);
     head.position.y = 1.65;
     this.group.add(head);
     this.meshParts.head = head;

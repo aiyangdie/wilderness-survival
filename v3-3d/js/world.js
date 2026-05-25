@@ -3,14 +3,24 @@ import { CFG, RESOURCES, CREATURES } from './config.js';
 import { HeightField, terrainHeight } from './terrain.js';
 
 const shared = {
-  trunkGeo: new THREE.CylinderGeometry(0.22, 0.3, 2, 6),
-  crownGeo: new THREE.ConeGeometry(1.1, 2.4, 6),
+  trunkGeo: new THREE.CylinderGeometry(0.22, 0.3, 2, 5),
+  crownGeo: new THREE.ConeGeometry(1.1, 2.4, 5),
   rockGeo: new THREE.DodecahedronGeometry(0.75, 0),
-  bushGeo: new THREE.SphereGeometry(0.55, 6, 6),
+  bushGeo: new THREE.SphereGeometry(0.55, 5, 5),
   bodyGeo: new THREE.BoxGeometry(1, 0.75, 1.5),
-  trunkMat: new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.9 }),
-  crownMat: new THREE.MeshStandardMaterial({ color: 0x2d6a3e, roughness: 0.9 }),
+  trunkMat: new THREE.MeshLambertMaterial({ color: 0x5c4033 }),
+  crownMat: new THREE.MeshLambertMaterial({ color: 0x2d6a3e }),
+  rockMat: new THREE.MeshLambertMaterial({ color: 0x6c757d }),
+  bushMat: new THREE.MeshLambertMaterial({ color: 0x40916c }),
 };
+
+const creatureMats = new Map();
+function getCreatureMat(color) {
+  if (!creatureMats.has(color)) {
+    creatureMats.set(color, new THREE.MeshLambertMaterial({ color }));
+  }
+  return creatureMats.get(color);
+}
 
 export class World3D {
   constructor(scene) {
@@ -36,10 +46,9 @@ export class World3D {
 
     const ground = new THREE.Mesh(
       groundGeo,
-      new THREE.MeshStandardMaterial({ color: 0x3d5a3c, roughness: 0.95, flatShading: true })
+      new THREE.MeshLambertMaterial({ color: 0x3d5a3c, flatShading: true })
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
     this.scene.add(ground);
     this.ground = ground;
 
@@ -89,24 +98,15 @@ export class World3D {
       crown.position.y = 2.8;
       group.add(trunk, crown);
     } else if (type === 'rock') {
-      const m = new THREE.Mesh(
-        shared.rockGeo,
-        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.85 })
-      );
+      const m = new THREE.Mesh(shared.rockGeo, shared.rockMat);
       m.position.y = 0.45;
       group.add(m);
     } else if (type === 'bush') {
-      const m = new THREE.Mesh(
-        shared.bushGeo,
-        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.85 })
-      );
+      const m = new THREE.Mesh(shared.bushGeo, shared.bushMat);
       m.position.y = 0.4;
       group.add(m);
     } else {
-      const body = new THREE.Mesh(
-        shared.bodyGeo,
-        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.8 })
-      );
+      const body = new THREE.Mesh(shared.bodyGeo, getCreatureMat(def.color));
       body.position.y = 0.55;
       group.add(body);
     }
@@ -125,6 +125,8 @@ export class World3D {
       dead: false,
       passive: !!def.passive,
       radius: def.radius || 1,
+      _lastX: x,
+      _lastZ: z,
     };
   }
 
