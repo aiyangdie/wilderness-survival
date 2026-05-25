@@ -188,15 +188,49 @@ canvas {
 
 #hint {
   text-align: center;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--muted);
 }
+
+#hint.compact {
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
+
+.equip-slots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  pointer-events: none;
+}
+
+.equip-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  background: rgba(14, 22, 36, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  min-width: 64px;
+}
+
+.equip-chip.filled {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.equip-chip span { font-size: 1.1rem; }
 
 /* ---- 准星 & 交互 ---- */
 #crosshair {
   position: fixed;
   left: 50%;
-  top: 50%;
+  top: 42%;
   transform: translate(-50%, -50%);
   z-index: 12;
   pointer-events: none;
@@ -572,6 +606,80 @@ button.secondary {
   margin-top: 16px;
   color: var(--mana);
   pointer-events: auto;
+}
+
+.panel-wide {
+  max-width: 560px;
+  max-height: 85vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.panel-wide h2 { text-align: center; color: var(--accent); }
+
+.craft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 52vh;
+  overflow-y: auto;
+  margin-bottom: 16px;
+  padding-right: 4px;
+}
+
+.craft-item {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.craft-item:hover:not(.disabled) {
+  border-color: var(--accent);
+}
+
+.craft-item.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.craft-item .ci-icon { font-size: 1.4rem; }
+
+.craft-item .ci-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.craft-item .ci-body small { color: var(--muted); font-size: 0.75rem; }
+
+.craft-item .ci-body em {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--warn);
+}
+
+.craft-item .ci-tag {
+  font-size: 0.65rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(62, 207, 142, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(62, 207, 142, 0.35);
+}
+
+#overlay-craft .panel-wide > button {
+  align-self: center;
 }
 
 .setting output { color: var(--accent); font-weight: 600; }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ITEMS, ENTITY_LABELS, RESOURCES } from './config.js';
+import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES } from './config.js';
 
 const FLOAT_POOL = 10;
 const LABEL_MAX = 4;
@@ -42,6 +42,9 @@ export class GameUI {
       start: document.getElementById('overlay-start'),
       dead: document.getElementById('overlay-dead'),
       pause: document.getElementById('overlay-pause'),
+      craft: document.getElementById('overlay-craft'),
+      craftList: document.getElementById('craft-list'),
+      equipSlots: document.getElementById('equip-slots'),
       sensX: document.getElementById('sens-x'),
       sensY: document.getElementById('sens-y'),
       sensValX: document.getElementById('sens-val-x'),
@@ -103,13 +106,17 @@ export class GameUI {
   setPointerHint(locked, paused) {
     if (paused) {
       this.els.hint.textContent = '游戏已暂停';
+      this.els.hint.classList.remove('hidden');
       this.els.crosshair.classList.remove('visible');
       return;
     }
     this.els.crosshair.classList.toggle('visible', locked);
-    if (!locked) {
-      this.els.hint.textContent = '点击画面开始 · Esc 暂停 · C 烤肉';
-      this.clearInteractPrompt();
+    if (locked) {
+      this.els.hint.textContent = 'WASD 移动 · Shift 跑 · 空格 跳 · 左键 攻击 · B 制作';
+      this.els.hint.classList.add('compact');
+    } else {
+      this.els.hint.textContent = '点击画面锁定鼠标';
+      this.els.hint.classList.remove('compact');
     }
   }
 
@@ -159,7 +166,10 @@ export class GameUI {
 
     const el = this.els.inventory;
     el.innerHTML = '';
-    const order = ['wood', 'stone', 'fiber', 'meat', 'cooked_meat'];
+    const order = [
+      'wood', 'stone', 'fiber', 'plank', 'rope', 'meat', 'cooked_meat',
+      'stone_axe', 'wooden_spear', 'leather_armor', 'backpack',
+    ];
     let any = false;
     for (const id of order) {
       const count = inventory[id];
@@ -172,7 +182,57 @@ export class GameUI {
       chip.innerHTML = `<span>${def.icon}</span><b>${count}</b><small>${def.name}</small>`;
       el.appendChild(chip);
     }
-    if (!any) el.innerHTML = '<span class="inv-empty">暂无资源 · C 可烤肉</span>';
+    if (!any) el.innerHTML = '<span class="inv-empty">暂无资源 · B 打开制作</span>';
+  }
+
+  updateEquipment(slots = {}) {
+    const el = this.els.equipSlots;
+    if (!el) return;
+    const labels = { weapon: '武器', armor: '护甲', accessory: '配件' };
+    el.innerHTML = '';
+    for (const [slot, label] of Object.entries(labels)) {
+      const id = slots[slot];
+      const def = id ? ITEMS[id] : null;
+      const chip = document.createElement('div');
+      chip.className = `equip-chip${def ? ' filled' : ''}`;
+      chip.innerHTML = def
+        ? `<span>${def.icon}</span><small>${def.name}</small>`
+        : `<span>—</span><small>${label}</small>`;
+      el.appendChild(chip);
+    }
+  }
+
+  showCraft(show, inventory, craftSys) {
+    this.els.craft?.classList.toggle('show', show);
+    if (show && craftSys) this.renderCraftList(inventory, craftSys);
+  }
+
+  renderCraftList(inventory, craftSys) {
+    const list = this.els.craftList;
+    if (!list) return;
+    list.innerHTML = '';
+    for (const { id, name, icon, costs, desc, category, build } of craftSys.getRecipeList()) {
+      const can = craftSys.canCraft(id, inventory);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `craft-item${can ? '' : ' disabled'}`;
+      const costStr = Object.entries(costs)
+        .map(([k, v]) => `${ITEMS[k]?.icon || k}×${v}`)
+        .join(' ');
+      btn.innerHTML = `
+        <span class="ci-icon">${icon}</span>
+        <span class="ci-body">
+          <b>${name}</b>
+          <small>${desc || ''}</small>
+          <em>${costStr}</em>
+        </span>
+        <span class="ci-tag">${build ? '建造' : category}</span>`;
+      btn.disabled = !can;
+      btn.addEventListener('click', () => {
+        if (this.onCraftRecipe) this.onCraftRecipe(id);
+      });
+      list.appendChild(btn);
+    }
   }
 
   setInteractPrompt(text, mode = 'neutral', hpRatio = null) {
@@ -204,6 +264,7 @@ export class GameUI {
     const ch = this.els.crosshair;
     ch.dataset.mode = mode || 'neutral';
     ch.classList.toggle('attack', attacking);
+    ch.classList.toggle('tps', true);
   }
 
   flashDamage() {

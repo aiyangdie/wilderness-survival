@@ -65,6 +65,7 @@ export class VfxManager {
     scene.add(this.slash);
     this.slashTimer = 0;
     this._pulseT = 0;
+    this._focusVisible = false;
   }
 
   _emit(x, y, z, color, count, spread, upSpeed, life) {
@@ -109,17 +110,21 @@ export class VfxManager {
   setFocus(x, y, z, mode = 'neutral', visible) {
     if (!visible) {
       this.focusRing.visible = false;
+      this._focusVisible = false;
       return;
     }
     const colors = { danger: 0xe85d5d, resource: 0x3ecf8e, neutral: 0xf0b429, item: 0x48cae4, catch: 0xf0b429 };
     this.focusRing.material.color.setHex(colors[mode] || colors.neutral);
-    this.focusRing.position.set(x, y + 0.12, z);
+    this.focusRing.position.set(x, y, z);
     this.focusRing.visible = true;
-    this._pulseT += 0.06;
-    this.focusRing.material.opacity = 0.42 + Math.sin(this._pulseT) * 0.15;
+    this._focusVisible = true;
   }
 
   update(dt) {
+    if (this._focusVisible) {
+      this._pulseT += dt * 5;
+      this.focusRing.material.opacity = 0.42 + Math.sin(this._pulseT) * 0.15;
+    }
     if (this.slashTimer > 0) {
       this.slashTimer -= dt;
       this.slash.material.opacity = Math.max(0, this.slashTimer / 0.1) * 0.85;

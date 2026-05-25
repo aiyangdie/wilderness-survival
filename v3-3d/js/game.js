@@ -1,10 +1,13 @@
 import * as THREE from 'three';
-import { CFG, CREATURES, RESOURCES, ENTITY_LABELS, ITEMS } from './config.js';
+import { CFG, CREATURES, RESOURCES, ENTITY_LABELS, ITEMS, RECIPES } from './config.js';
 import { HumanCharacter } from './human.js';
 import { World3D } from './world.js';
 import { GameInput } from './input.js';
 import { GameUI } from './ui.js';
 import { VfxManager } from './effects.js';
+import { CraftSystem } from './craft.js';
+import { BuildSystem } from './buildings.js';
+import { EquipmentManager } from './equipment.js';
 
 const PHASE_LABELS = {
   dawn: '🌅 清晨',
@@ -38,6 +41,11 @@ export class Game3D {
     this._lastLitPhase = '';
     this._fpsAccum = 0;
     this._fpsFrames = 0;
+    this._lastFocusKey = '';
+    this.craftOpen = false;
+    this.craft = new CraftSystem();
+    this.equipment = null;
+    this.buildSys = null;
 
     this.yaw = 0;
     this.pitch = 0.25;
@@ -53,6 +61,7 @@ export class Game3D {
 
     this._initRenderer();
     this.ui = new GameUI();
+    this.ui.onCraftRecipe = (id) => this.onCraftRecipe(id);
     this.input = new GameInput(this.canvas, () => this.togglePause());
     this.ui.bindPauseControls(this.input, () => this.togglePause(false));
     this.vfx = null;
@@ -66,6 +75,9 @@ export class Game3D {
 
     document.getElementById('btn-start').onclick = () => this._begin(true);
     document.getElementById('btn-restart').onclick = () => this._begin(false);
+    document.getElementById('btn-craft-close')?.addEventListener('click', () => {
+      if (this.craftOpen) this._toggleCraft();
+    });
     window.addEventListener('resize', () => this._resize());
     this._resize();
   }
@@ -103,6 +115,10 @@ export class Game3D {
   togglePause(forceState) {
     if (!this.running) return;
     const next = forceState !== undefined ? forceState : !this.paused;
+    if (next && this.craftOpen) {
+      this.craftOpen = false;
+      this.ui.showCraft(false);
+    }
     this.paused = next;
     this.input.setPaused(next);
     this.ui.showPause(next);
@@ -143,17 +159,20 @@ export class Game3D {
       if (!keepTypes.has(c.type) && !keepNodes.has(c)) this.scene.remove(c);
     });
 
-    this.world = new World3D(this.scene);
-    this.world.generate();
-    this.vfx = new VfxManager(this.scene);
-
     if (!this.human) {
       this.human = new HumanCharacter();
       await this.human.load();
       this.scene.add(this.human.group);
+      this.equipment = new EquipmentManager(this.human);
     } else if (!this.human.group.parent) {
       this.scene.add(this.human.group);
     }
+    if (!this.equipment) this.equipment = new EquipmentManager(this.human);
+
+    this.world = new World3D(this.scene);
+    this.world.generate();
+    this.vfx = new VfxManager(this.scene);
+    this.buildSys = new BuildSystem(this.scene, this.world);
 
     const spawnY = this.world.getHeightAt(0, 0);
     this.player = this._newPlayer();
@@ -182,7 +201,9 @@ export class Game3D {
     this.input.setPaused(false);
     setTimeout(() => this.canvas.requestPointerLock(), 100);
     this.ui.toast(
-      this.human.useGltf ? '拟真角色已就绪 · 🛡️ 开局保护 4 秒' : '使用备用角色 · C 键烤肉',
+      this.human.useGltf
+        ? '动作已就绪：走/跑/跳/攻击 · B 制作 · 可建造'
+        : 'B 打开制作 · C 快速烤肉',
       'info'
     );
     this._loop();
@@ -215,6 +236,8 @@ export class Game3D {
     const p = this.player;
     if (!p.alive) return;
 
+    if (this.craftOpen) return;
+
     if (this.input.yawDelta) this.yaw += this.input.yawDelta;
     if (this.input.pitchDelta) {
       this.pitch = Math.max(-0.45, Math.min(0.55, this.pitch + this.input.pitchDelta));
@@ -224,7 +247,20 @@ export class Game3D {
       this.invShow = !this.invShow;
       document.getElementById('hud-bottom').classList.toggle('hidden', !this.invShow);
     }
-    if (this.input.justPressed('KeyC')) this._craft();
+    if (this.input.justPressed('KeyB')) this._toggleCraft();
+    if (this.buildSys?.mode) {
+      if (this.input.justPressed('KeyR')) this.buildSys.rotate();
+      if (this.input.clickAttack) this._tryPlaceBuild();
+      if (this.input.justPressed('Escape')) this.buildSys.exit();
+    } else if (!this.craftOpen) {
+      if (this.input.justPressed('KeyC')) this._craftQuick('cooked_meat');
+      if (this.input.clickAttack) this._attack();
+      if (this.input.wantsInteract()) this._interact();
+    }
+
+    if (this.buildSys?.mode) {
+      this.buildSys.update(p.x, p.y, p.z, this.yaw, (x, z) => this.world.getHeightAt(x, z));
+    }
 
     this._updateTime(dt);
     const sprinting = this._updatePlayer(dt);
@@ -232,6 +268,11 @@ export class Game3D {
     if (this.phase !== this._lastLitPhase) {
       this._updateLighting();
       this._lastLitPhase = this.phase;
+    }
+
+    const shelterHeal = this.buildSys?.getShelterHeal(p.x, p.z) || 0;
+    if (shelterHeal > 0) {
+      p.health = Math.min(100, p.health + shelterHeal * dt);
     }
 
     p.hunger = Math.max(0, p.hunger - CFG.decay.hunger * dt);
@@ -256,9 +297,6 @@ export class Game3D {
     else this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
     if (this.camShake > 0) this.camShake = Math.max(0, this.camShake - dt * 2);
 
-    if (this.input.clickAttack) this._attack();
-    if (this.input.wantsInteract()) this._interact();
-
     if (p.health <= 0) this._gameOver();
 
     this.uiFastTimer += dt;
@@ -277,8 +315,8 @@ export class Game3D {
     const p = this.player;
     const run = this.input.wantsSprint() && p.stamina > 8;
     const speed = run ? CFG.player.runSpeed : CFG.player.walkSpeed;
-    if (run) p.stamina = Math.max(0, p.stamina - 18 * dt);
-    else p.stamina = Math.min(100, p.stamina + 22 * dt);
+    if (run) p.stamina = Math.max(0, p.stamina - 14 * dt);
+    else p.stamina = Math.min(100, p.stamina + 28 * dt);
 
     this._forward.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     this._right.set(this._forward.z, 0, -this._forward.x);
@@ -334,7 +372,7 @@ export class Game3D {
     }
 
     this.human.setPosition(p.x, p.y, p.z);
-    this.human.update(dt, moving ? speed : 0, p.onGround, this.isAttacking);
+    this.human.update(dt, moving ? speed : 0, p.onGround, this.isAttacking, this.equipment);
     return run && moving;
   }
 
@@ -371,7 +409,8 @@ export class Game3D {
             e.x += (dx / dist) * def.speed * dt;
             e.z += (dz / dist) * def.speed * dt;
             if (dist < 2.5 && p.invuln <= 0 && !protectedSpawn) {
-              p.health -= (def.damage || 10) * dt * 1.5;
+              const reduce = this._getCombatStats().damageReduce;
+              p.health -= (def.damage || 10) * dt * 1.5 * (1 - reduce);
               p.invuln = 0.55;
             }
           }
@@ -417,12 +456,18 @@ export class Game3D {
     this.world.entities = this.world.entities.filter((ent) => !ent.dead);
   }
 
+  _getCombatStats() {
+    return this.equipment?.getStats() || { attackBonus: 0, rangeBonus: 0, interactBonus: 0, damageReduce: 0 };
+  }
+
   _attack() {
     const p = this.player;
     if (p.attackCd > 0) return;
+    const stats = this._getCombatStats();
+    const range = CFG.player.attackRange + stats.rangeBonus;
 
     const target = this.world.getAttackTarget(
-      p.x, p.z, CFG.player.attackRange, this.phase === 'night'
+      p.x, p.z, range, this.phase === 'night'
     );
     if (!target) {
       this.ui.toast('没有可攻击的目标', 'warn');
@@ -434,7 +479,7 @@ export class Game3D {
     this.attackAnimTimer = 0.32;
 
     const e = target.entity;
-    const dmg = CFG.player.attackDamage;
+    const dmg = CFG.player.attackDamage + stats.attackBonus;
     e.hp -= dmg;
 
     const col = e.def?.hostile ? 0xff4444 : 0xffcc66;
@@ -453,6 +498,7 @@ export class Game3D {
   _interact() {
     if (this.interactCooldown > 0) return;
     const p = this.player;
+    const stats = this._getCombatStats();
 
     const catchT = this.world.getCatchable(
       p.x, p.z, CFG.player.catchRange, CFG.player.catchHpRatio
@@ -479,7 +525,7 @@ export class Game3D {
     if (target) {
       this.interactCooldown = 0.3;
       const e = target.entity;
-      e.hp -= CFG.player.interactDamage;
+      e.hp -= CFG.player.interactDamage + stats.interactBonus;
       this.vfx.burst(e.x, e.y, e.z, 0x8fbc8f, 3);
       if (e.hp <= 0) {
         this._killEntity(e, true);
@@ -511,19 +557,56 @@ export class Game3D {
     this.ui.toast('附近没有可交互目标', 'warn');
   }
 
-  _craft() {
-    const need = CFG.craft.cooked_meat;
-    const inv = this.inventory;
-    if ((inv.meat || 0) < need.meat || (inv.wood || 0) < need.wood) {
-      this.ui.toast('烤肉需要：生肉×1 + 木材×1', 'warn');
+  _craftQuick(recipeId) {
+    const res = this.craft.craft(recipeId, this.inventory, this.equipment);
+    if (!res.ok) {
+      this.ui.toast(res.reason || '材料不足', 'warn');
       return;
     }
-    inv.meat -= need.meat;
-    inv.wood -= need.wood;
-    inv.cooked_meat = (inv.cooked_meat || 0) + 1;
     this.ui.markInventoryDirty();
-    this.ui.toast('🍖 烤肉完成（按 E 食用）', 'success');
+    this.ui.updateEquipment(this.equipment?.slots);
+    this.ui.toast(`${RECIPES[recipeId]?.name || recipeId} 完成`, 'success');
     this.player.score += 5;
+  }
+
+  _toggleCraft() {
+    this.craftOpen = !this.craftOpen;
+    if (this.craftOpen) {
+      document.exitPointerLock();
+      this.ui.showCraft(true, this.inventory, this.craft);
+    } else {
+      this.ui.showCraft(false);
+      if (this.running && !this.paused) this.canvas.requestPointerLock();
+    }
+  }
+
+  onCraftRecipe(recipeId) {
+    const res = this.craft.craft(recipeId, this.inventory, this.equipment);
+    if (!res.ok) {
+      this.ui.toast(res.reason || '材料不足', 'warn');
+      return;
+    }
+    this.ui.markInventoryDirty();
+    this.ui.updateEquipment(this.equipment?.slots);
+    this.ui.renderCraftList(this.inventory, this.craft);
+
+    if (res.build) {
+      this.craftOpen = false;
+      this.ui.showCraft(false);
+      this.buildSys.enter(res.build);
+      this.ui.toast(`放置模式：${RECIPES[recipeId].name} · 左键放置 R旋转 Esc取消`, 'info');
+      return;
+    }
+    this.ui.toast(`${res.recipe.name} 制作完成`, 'success');
+    this.player.score += 8;
+  }
+
+  _tryPlaceBuild() {
+    if (!this.buildSys?.mode) return;
+    if (this.buildSys.tryPlace(this.inventory)) {
+      this.ui.toast('建造完成', 'success');
+      this.player.score += 15;
+    }
   }
 
   _killEntity(e, harvest) {
@@ -575,10 +658,23 @@ export class Game3D {
 
     if (focus?.entity && !focus.entity.dead) {
       const fe = focus.entity;
-      this.vfx.setFocus(fe.x, fe.y, fe.z, prompt?.mode || 'neutral', true);
-    } else {
+      const fd = Math.hypot(fe.x - p.x, fe.z - p.z);
+      if (fd >= CFG.ui.focusMinDist) {
+        const fy = fe.y + (fe.type === 'wolf' ? 0.35 : fe.type === 'deer' ? 0.45 : 0.25);
+        const fkey = `${fe.id}:${prompt?.mode}:${Math.round(fe.x)}`;
+        if (fkey !== this._lastFocusKey) {
+          this._lastFocusKey = fkey;
+          this.vfx.setFocus(fe.x, fy, fe.z, prompt?.mode || 'neutral', true);
+        }
+      } else if (this._lastFocusKey) {
+        this._lastFocusKey = '';
+        this.vfx.setFocus(0, 0, 0, 'neutral', false);
+      }
+    } else if (this._lastFocusKey) {
+      this._lastFocusKey = '';
       this.vfx.setFocus(0, 0, 0, 'neutral', false);
     }
+    this.ui.updateEquipment(this.equipment?.slots);
   }
 
   _refreshUISlow() {
