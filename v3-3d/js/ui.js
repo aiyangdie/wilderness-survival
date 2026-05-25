@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES, CFG } from './config.js?v=20250527d';
+import { ITEMS, ENTITY_LABELS, RESOURCES, RECIPES, CFG } from './config.js';
 
 const CATCH_HP_RATIO = CFG.player.catchHpRatio;
 const CATCH_CLOSE_DIST = CFG.player.catchCloseDist ?? 4.5;

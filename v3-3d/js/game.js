@@ -3,7 +3,7 @@ import { CFG, CREATURES, RESOURCES, ENTITY_LABELS, ITEMS, RECIPES } from './conf
 import { HumanCharacter } from './human.js';
 import { World3D } from './world.js';
 import { GameInput } from './input.js';
-import { GameUI } from './ui.js?v=20250527d';
+import { GameUI } from './ui.js';
 import { VfxManager } from './effects.js';
 import { CraftSystem } from './craft.js';
 import { BuildSystem } from './buildings.js';
@@ -200,6 +200,11 @@ export class Game3D {
     const spawnY = this.world.getHeightAt(0, 0);
     this.player = this._newPlayer();
     this.player.y = spawnY;
+    this.player.groundY = spawnY;
+    this._lastGroundX = 0;
+    this._lastGroundZ = 0;
+    this._camGroundY = spawnY;
+    this._camGroundFrame = 0;
     this.inventory = { wood: 5, fiber: 3 };
     this.day = 1;
     this.time = 0.32;
@@ -248,9 +253,13 @@ export class Game3D {
 
     if (!this.paused) {
       const logicDt = Math.min(rawDt, CFG.render.maxDt);
-      this._update(logicDt, rawDt);
-      this.vfx?.update(logicDt);
-      this.ui.updateFloats(logicDt);
+      try {
+        this._update(logicDt, rawDt);
+        this.vfx?.update(logicDt);
+        this.ui.updateFloats(logicDt);
+      } catch (err) {
+        console.error('[Game3D] update error', err);
+      }
       this._render();
     } else if ((this._pauseRenderCd = (this._pauseRenderCd ?? 0) + 1) % 4 === 0) {
       this._render();
@@ -443,6 +452,8 @@ export class Game3D {
     }
 
     const groundMoved =
+      p.groundY == null ||
+      Number.isNaN(p.groundY) ||
       Math.abs(p.x - this._lastGroundX) > 0.12 ||
       Math.abs(p.z - this._lastGroundZ) > 0.12 ||
       !p.onGround;
@@ -451,7 +462,7 @@ export class Game3D {
       this._lastGroundX = p.x;
       this._lastGroundZ = p.z;
     }
-    const groundY = p.groundY;
+    const groundY = p.groundY ?? this.world.getHeightAt(p.x, p.z);
 
     if (this.input.justPressed('Space') && (p.onGround || this.coyoteTimer > 0)) {
       p.vy = CFG.player.jumpForce;
@@ -916,6 +927,11 @@ export class Game3D {
 
   _render() {
     const p = this.player;
+    if (!Number.isFinite(p.y) && this.world) {
+      const gy = this.world.getHeightAt(p.x, p.z);
+      p.y = gy;
+      p.groundY = gy;
+    }
     const cam = CFG.camera;
     const dist = cam.dist;
     const height = cam.height + this.pitch * 1.5;
