@@ -90,6 +90,22 @@ export class World3D {
     this.scene.add(ground);
     this.ground = ground;
 
+    const half = this.getBoundsHalf() - 1;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(half - 1.2, half, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0x4a6741,
+        transparent: true,
+        opacity: 0.45,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.15;
+    this.scene.add(ring);
+    this.boundaryRing = ring;
+
     const max = CFG.spawn.tree + CFG.spawn.rock + CFG.spawn.bush + 10;
     this.batches.trunk = new PropBatch(this.scene, shared.trunkGeo, shared.trunkMat, max);
     this.batches.crown = new PropBatch(this.scene, shared.crownGeo, shared.crownMat, max);
@@ -172,6 +188,9 @@ export class World3D {
       radius: def.radius || 1,
       _lastX: x,
       _lastZ: z,
+      _fleeStamina: 85,
+      _faceX: x,
+      _faceZ: z,
     };
   }
 
@@ -194,6 +213,25 @@ export class World3D {
     return this.heightField?.sample(x, z) ?? terrainHeight(x, z);
   }
 
+  getBoundsHalf() {
+    return this.size * (CFG.worldBounds ?? 0.46);
+  }
+
+  clampInBounds(x, z, margin = 0.5) {
+    const half = this.getBoundsHalf() - margin;
+    return {
+      x: Math.max(-half, Math.min(half, x)),
+      z: Math.max(-half, Math.min(half, z)),
+      hitEdge:
+        x <= -half + 0.01 || x >= half - 0.01 || z <= -half + 0.01 || z >= half - 0.01,
+    };
+  }
+
+  isNearBounds(x, z, pad = 3) {
+    const half = this.getBoundsHalf();
+    return Math.abs(x) > half - pad || Math.abs(z) > half - pad;
+  }
+
   resolveCircleMove(px, pz, nx, nz, radius) {
     let x = nx;
     let z = nz;
@@ -208,11 +246,8 @@ export class World3D {
         z += dz * push;
       }
     }
-    const half = this.size * 0.46;
-    return {
-      x: Math.max(-half, Math.min(half, x)),
-      z: Math.max(-half, Math.min(half, z)),
-    };
+    const c = this.clampInBounds(x, z, radius);
+    return { x: c.x, z: c.z, hitEdge: c.hitEdge };
   }
 
   spawnNightMonsters() {
@@ -262,10 +297,15 @@ export class World3D {
   getCatchable(px, pz, range, hpRatio) {
     let best = null;
     let bestD = range;
+    const closeDist = CFG.player.catchCloseDist ?? 4.5;
+    const closeRatio = CFG.player.catchCloseHpRatio ?? 0.72;
     for (const e of this.entities) {
       if (e.dead || !e.passive) continue;
-      if (e.hp > e.maxHp * hpRatio) continue;
       const d = this._dist(px, pz, e);
+      if (d >= range) continue;
+      const hpOk = e.hp <= e.maxHp * hpRatio;
+      const closeOk = d <= closeDist && e.hp <= e.maxHp * closeRatio;
+      if (!hpOk && !closeOk) continue;
       if (d < bestD) { bestD = d; best = e; }
     }
     return best ? this._wrapTarget(best, bestD, 'catch') : null;

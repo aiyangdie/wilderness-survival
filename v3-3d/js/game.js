@@ -44,6 +44,8 @@ export class Game3D {
     this._fpsFrames = 0;
     this._lastFocusKey = '';
     this.craftOpen = false;
+    this._edgeToastCd = 0;
+    this._unlockHintShown = false;
     this.craft = new CraftSystem();
     this.equipment = null;
     this.buildSys = null;
@@ -86,7 +88,7 @@ export class Game3D {
   _initRenderer() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
-    this.scene.fog = new THREE.Fog(0x87ceeb, 50, 140);
+    this.scene.fog = new THREE.Fog(0x87ceeb, 65, 155);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.2, 250);
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -203,8 +205,8 @@ export class Game3D {
     setTimeout(() => this.canvas.requestPointerLock(), 100);
     this.ui.toast(
       this.human.useGltf
-        ? '动作已就绪：走/跑/跳/攻击 · B 制作 · 可建造'
-        : 'B 打开制作 · C 快速烤肉',
+        ? 'Shift 冲刺追猎 · 打伤后 E 捕获 · 动物不会跑出边界'
+        : 'B 制作 · Shift 追猎 · E 捕获',
       'info'
     );
     this._loop();
@@ -315,10 +317,52 @@ export class Game3D {
     }
   }
 
+  _nearestPassiveDist() {
+    const p = this.player;
+    let best = Infinity;
+    for (const e of this.world.entities) {
+      if (e.dead || !e.passive) continue;
+      const d = Math.hypot(e.x - p.x, e.z - p.z);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  _movePassiveFlee(e, dx, dz, dist, def, dt, sprinting) {
+    const P = CFG.passive;
+    if (dist >= P.calmDist) {
+      e._fleeStamina = Math.min(100, (e._fleeStamina ?? 85) + dt * P.staminaRegen);
+      return false;
+    }
+    if (dist < 0.55 || dist > P.fleeDist) return false;
+
+    const drain = sprinting ? P.staminaDrain * 1.3 : P.staminaDrain;
+    e._fleeStamina = Math.max(0, (e._fleeStamina ?? 85) - dt * drain);
+    const tired = e._fleeStamina <= 10;
+    const cornered = this.world.isNearBounds(e.x, e.z, 5);
+
+    let mul = P.fleeSpeedMul;
+    if (tired) mul = P.tiredSpeedMul;
+    else if (cornered) mul = P.corneredSpeedMul;
+
+    const spd = def.speed * mul;
+    const nx = e.x - (dx / dist) * spd * dt;
+    const nz = e.z - (dz / dist) * spd * dt;
+    const c = this.world.clampInBounds(nx, nz, e.radius || 1);
+    e.x = c.x;
+    e.z = c.z;
+    if (c.hitEdge) e._fleeStamina = Math.max(0, e._fleeStamina - dt * 45);
+    return true;
+  }
+
   _updatePlayer(dt) {
     const p = this.player;
     const run = this.input.wantsSprint() && p.stamina > 8;
-    const speed = run ? CFG.player.runSpeed : CFG.player.walkSpeed;
+    let speed = run ? CFG.player.runSpeed : CFG.player.walkSpeed;
+    const preyDist = this._nearestPassiveDist();
+    if (run && preyDist < 14 && preyDist > 0.8) {
+      speed *= CFG.player.sprintBonusNearPrey ?? 1.12;
+    }
     if (run) p.stamina = Math.max(0, p.stamina - 14 * dt);
     else p.stamina = Math.min(100, p.stamina + 28 * dt);
 
@@ -339,6 +383,13 @@ export class Game3D {
         const resolved = this.world.resolveCircleMove(p.x, p.z, nx, nz, 0.55);
         p.x = resolved.x;
         p.z = resolved.z;
+        if (resolved.hitEdge) {
+          if (this._edgeToastCd <= 0) {
+            this._edgeToastCd = 2.5;
+            this.ui.toast('已到达荒野边界', 'info');
+          }
+        }
+        if (this._edgeToastCd > 0) this._edgeToastCd -= dt;
         this.human.setRotationY(Math.atan2(this._moveDir.x, this._moveDir.z));
         moving = true;
       }
@@ -388,6 +439,8 @@ export class Game3D {
     const px = p.x;
     const pz = p.z;
 
+    const sprinting = this.input.wantsSprint() && p.stamina > 8;
+
     if (isNight && !this.nightSpawned) {
       this.world.spawnNightMonsters();
       this.nightSpawned = true;
@@ -406,13 +459,16 @@ export class Game3D {
         const prevX = e.x;
         const prevZ = e.z;
 
-        if (e.passive && dist > 0.5 && dist < 14) {
-          e.x -= (dx / dist) * def.speed * dt;
-          e.z -= (dz / dist) * def.speed * dt;
+        if (e.passive && dist > 0.5 && dist < CFG.passive.fleeDist + 2) {
+          moved = this._movePassiveFlee(e, dx, dz, dist, def, dt, sprinting);
         } else if (CREATURES[e.type] && !(def.nightOnly && !isNight)) {
           if (dist < (def.aggro || 20) && dist > 0.5) {
             e.x += (dx / dist) * def.speed * dt;
             e.z += (dz / dist) * def.speed * dt;
+            const c = this.world.clampInBounds(e.x, e.z, e.radius || 1);
+            e.x = c.x;
+            e.z = c.z;
+            moved = true;
             if (dist < 2.5 && p.invuln <= 0 && !protectedSpawn) {
               const reduce = this._getCombatStats().damageReduce;
               p.health -= (def.damage || 10) * dt * 1.5 * (1 - reduce);
@@ -421,7 +477,7 @@ export class Game3D {
           }
         }
 
-        moved = Math.abs(e.x - prevX) > 0.02 || Math.abs(e.z - prevZ) > 0.02;
+        moved = moved || Math.abs(e.x - prevX) > 0.02 || Math.abs(e.z - prevZ) > 0.02;
       }
 
       if (dist > CFG.entityCullDist) continue;
@@ -648,7 +704,22 @@ export class Game3D {
     this.ui.updateBars(p, sprinting);
     this.ui.updateMeta(this.day, PHASE_LABELS[this.phase] || '', this.time, p.score, this.phase);
     this.ui.updateSpawnShield(this.spawnInvuln);
-    this.ui.setPointerHint(this.input.mouseLocked, this.paused);
+    if (!this.input.mouseLocked && !this.craftOpen && !this.paused) {
+      this.ui.setPointerHint(false, false);
+    } else {
+      this.ui.setPointerHint(this.input.mouseLocked, this.paused);
+    }
+
+    if (
+      this.running &&
+      !this.paused &&
+      !this.input.mouseLocked &&
+      !this.craftOpen &&
+      !this._unlockHintShown
+    ) {
+      this._unlockHintShown = true;
+      this.ui.toast('点击画面锁定鼠标，方便转向追猎', 'info');
+    }
 
     this.focusTarget = this.world.getFocusTarget(
       p.x, p.z, CFG.player.interactRange, CFG.player.attackRange, this.phase === 'night'

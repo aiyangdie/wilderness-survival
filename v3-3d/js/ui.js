@@ -421,10 +421,13 @@ export class GameUI {
     }
     if (target.kind === 'passive') {
       const ratio = target.hp / target.maxHp;
-      if (ratio <= 0.45) {
-        return { text: `[E] 捕获 / [左键] 狩猎`, mode: 'catch', hpRatio: ratio };
+      if (ratio <= CFG.player.catchHpRatio) {
+        return { text: `[E] 捕获（已削弱）`, mode: 'catch', hpRatio: ratio };
       }
-      return { text: `[左键] 狩猎 ${ENTITY_LABELS[target.type] || target.type}`, mode: 'neutral', hpRatio: ratio };
+      if (target.dist <= (CFG.player.catchCloseDist ?? 4.5)) {
+        return { text: `[E] 近距离捕获 / [左键] 狩猎`, mode: 'catch', hpRatio: ratio };
+      }
+      return { text: `[Shift] 冲刺追猎 · [左键] 打伤后 E 捕获`, mode: 'neutral', hpRatio: ratio };
     }
     return null;
   }
