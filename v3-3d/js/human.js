@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { SkeletonUtils } from 'three/addons/utils/SkeletonUtils.js';
+import { clone as cloneSkinnedScene } from 'three/addons/utils/SkeletonUtils.js';
 
 const MODEL_URL = 'https://threejs.org/examples/models/gltf/Soldier.glb';
+const LOAD_TIMEOUT_MS = 15000;
 
 /** 全局只加载一次，避免重启卡顿 */
 let _gltfCache = null;
@@ -10,8 +11,11 @@ let _preloadPromise = null;
 
 export function preloadCharacter() {
   if (!_preloadPromise) {
-    _preloadPromise = new GLTFLoader()
-      .loadAsync(MODEL_URL)
+    const loader = new GLTFLoader().loadAsync(MODEL_URL);
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('角色模型加载超时')), LOAD_TIMEOUT_MS);
+    });
+    _preloadPromise = Promise.race([loader, timeout])
       .then((g) => {
         _gltfCache = g;
         return g;
@@ -84,7 +88,7 @@ export class HumanCharacter {
   async load() {
     try {
       const gltf = await preloadCharacter();
-      this.model = SkeletonUtils.clone(gltf.scene);
+      this.model = cloneSkinnedScene(gltf.scene);
       this.model.traverse((obj) => {
         if (obj.isMesh) {
           obj.frustumCulled = true;

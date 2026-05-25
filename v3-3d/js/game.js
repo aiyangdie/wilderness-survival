@@ -121,6 +121,9 @@ export class Game3D {
     }
     try {
       await this.start();
+    } catch (err) {
+      console.error(err);
+      this.ui.toast('启动失败，请刷新页面重试', 'warn');
     } finally {
       if (btn) {
         btn.disabled = false;
