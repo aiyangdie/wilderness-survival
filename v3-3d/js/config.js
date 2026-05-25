@@ -26,7 +26,7 @@ export const CFG = {
     catchCloseHpRatio: 0.72,
     coyoteTime: 0.12,
     buildReach: 6,
-    footOffset: 0.08,
+    footOffset: 0,
     groundSnapSpeed: 24,
   },
   survival: {

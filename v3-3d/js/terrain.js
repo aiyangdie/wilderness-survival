@@ -19,7 +19,8 @@ export class HeightField {
       for (let ix = 0; ix <= segments; ix++) {
         const x = ix * this.cell - this.half;
         const z = iz * this.cell - this.half;
-        this.heights[iz * (segments + 1) + ix] = terrainHeight(x, z);
+        // 与 PlaneGeometry 绕 X 旋转 -90° 后一致：世界 Z = -localY
+        this.heights[iz * (segments + 1) + ix] = terrainHeight(x, -z);
       }
     }
   }
@@ -28,7 +29,7 @@ export class HeightField {
     const lx = x + this.half;
     const lz = z + this.half;
     if (lx < 0 || lz < 0 || lx >= this.size || lz >= this.size) {
-      return terrainHeight(x, z);
+      return terrainHeight(x, -z);
     }
 
     const gx = lx / this.cell;

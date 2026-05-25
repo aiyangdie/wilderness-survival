@@ -93,6 +93,9 @@ export class World3D {
     this.colliders = [];
     this.heightField = null;
     this.batches = {};
+    this._raycaster = new THREE.Raycaster();
+    this._rayOrigin = new THREE.Vector3();
+    this._rayDir = new THREE.Vector3(0, -1, 0);
   }
 
   generate() {
@@ -102,7 +105,9 @@ export class World3D {
     const groundGeo = new THREE.PlaneGeometry(this.size, this.size, seg, seg);
     const pos = groundGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
-      pos.setZ(i, terrainHeight(pos.getX(i), pos.getY(i)));
+      const lx = pos.getX(i);
+      const ly = pos.getY(i);
+      pos.setZ(i, terrainHeight(lx, -ly));
     }
     groundGeo.computeVertexNormals();
 
@@ -191,7 +196,7 @@ export class World3D {
     return { x, z, r, groundY, surfaceY, type };
   }
 
-  /** 脚底支撑高度：地形 + 石头/树/建筑顶面取最高 */
+  /** 脚底支撑高度：射线贴草地 + 石头/建筑顶面取最高 */
   getFootY(x, z, probeR = 0.42) {
     const offsets = [
       [0, 0],
@@ -206,7 +211,7 @@ export class World3D {
     for (const [ox, oz] of offsets) {
       const px = x + ox;
       const pz = z + oz;
-      let h = this.getHeightAt(px, pz);
+      let h = this._raycastGroundY(px, pz);
       for (const c of this.colliders) {
         const dx = px - c.x;
         const dz = pz - c.z;
@@ -295,7 +300,16 @@ export class World3D {
   }
 
   getHeightAt(x, z) {
-    return this.heightField?.sample(x, z) ?? terrainHeight(x, z);
+    return this.heightField?.sample(x, z) ?? terrainHeight(x, -z);
+  }
+
+  /** 射线检测真实草地表面（与可见网格完全一致） */
+  _raycastGroundY(x, z) {
+    if (!this.ground) return this.getHeightAt(x, z);
+    this._rayOrigin.set(x, 120, z);
+    this._raycaster.set(this._rayOrigin, this._rayDir);
+    const hits = this._raycaster.intersectObject(this.ground, false);
+    return hits.length > 0 ? hits[0].point.y : this.getHeightAt(x, z);
   }
 
   getBoundsHalf() {

@@ -202,10 +202,11 @@ export class HumanCharacter {
   }
 
   _calibrateFootLift() {
+    if (this.mixer) this.mixer.update(0);
     this.group.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(this.group);
     if (Number.isFinite(box.min.y)) {
-      this._footLift = -box.min.y + 0.03;
+      this._footLift = Math.max(0, -box.min.y + 0.06);
     }
   }
 
